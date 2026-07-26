@@ -1,9 +1,13 @@
 import { useState, useRef, useEffect } from 'react'
 import { FaSearch, FaBell, FaBars, FaChevronDown, FaUserCircle, FaCog, FaSignOutAlt } from 'react-icons/fa'
+import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../../contexts/AuthContext'
 
 export default function Navbar({ onOpenMobile }) {
   const [profileOpen, setProfileOpen] = useState(false)
   const dropdownRef = useRef(null)
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
 
   useEffect(() => {
     function handleClickOutside(e) {
@@ -14,6 +18,20 @@ export default function Navbar({ onOpenMobile }) {
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login')
+    setProfileOpen(false)
+  }
+
+  const getInitials = (name) => {
+    return name
+      .split(' ')
+      .map((n) => n[0])
+      .join('')
+      .toUpperCase()
+  }
 
   return (
     <header className="sticky top-0 z-20 h-16 bg-white/80 backdrop-blur-md border-b border-slate-200">
@@ -54,12 +72,14 @@ export default function Navbar({ onOpenMobile }) {
               onClick={() => setProfileOpen((v) => !v)}
               className="flex items-center gap-2 p-1 pr-2 rounded-lg hover:bg-slate-100 transition-colors"
             >
-              <div className="w-8 h-8 rounded-full bg-accent-600 text-white flex items-center justify-center text-sm font-semibold">
-                JD
-              </div>
+              <img
+                src={user?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.name}`}
+                alt={user?.name}
+                className="w-8 h-8 rounded-full"
+              />
               <div className="hidden sm:flex flex-col items-start leading-tight">
-                <span className="text-sm font-semibold text-slate-900">Jane Doe</span>
-                <span className="text-[11px] text-slate-400">Administrator</span>
+                <span className="text-sm font-semibold text-slate-900">{user?.name || 'User'}</span>
+                <span className="text-[11px] text-slate-400 capitalize">{user?.role || 'User'}</span>
               </div>
               <FaChevronDown className="hidden sm:block text-xs text-slate-400" />
             </button>
@@ -67,8 +87,8 @@ export default function Navbar({ onOpenMobile }) {
             {profileOpen && (
               <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-soft-lg border border-slate-200 py-2 animate-in">
                 <div className="px-4 py-3 border-b border-slate-100">
-                  <p className="text-sm font-semibold text-slate-900">Jane Doe</p>
-                  <p className="text-xs text-slate-400">jane.doe@stockpilot.io</p>
+                  <p className="text-sm font-semibold text-slate-900">{user?.name || 'User'}</p>
+                  <p className="text-xs text-slate-400">{user?.email || 'user@example.com'}</p>
                 </div>
                 <div className="py-1">
                   <button className="flex items-center gap-3 w-full px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 transition-colors">
@@ -79,7 +99,10 @@ export default function Navbar({ onOpenMobile }) {
                   </button>
                 </div>
                 <div className="border-t border-slate-100 pt-1">
-                  <button className="flex items-center gap-3 w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors">
+                  <button
+                    onClick={handleLogout}
+                    className="flex items-center gap-3 w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                  >
                     <FaSignOutAlt /> Sign out
                   </button>
                 </div>

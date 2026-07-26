@@ -10,62 +10,128 @@ import {
   FaHistory,
   FaBell,
   FaCog,
+  FaChevronDown,
 } from "react-icons/fa";
+import { FiPackage, FiAlertTriangle, FiTrendingDown } from "react-icons/fi";
 
-export const navItems = [
+export const navGroups = [
   {
+    id: "dashboard",
     label: "Dashboard",
-    path: "/",
     icon: FaThLarge,
+    items: [
+      {
+        label: "Dashboard",
+        path: "/",
+        icon: FaThLarge,
+      },
+    ],
   },
   {
+    id: "inventory",
+    label: "Inventory",
+    icon: FiPackage,
+    items: [
+      {
+        label: "Inventory Management",
+        path: "/inventory",
+        icon: FiPackage,
+      },
+      {
+        label: "Low Stock Alerts",
+        path: "/alerts",
+        icon: FiAlertTriangle,
+      },
+      {
+        label: "Transactions",
+        path: "/inventory-history",
+        icon: FiTrendingDown,
+      },
+    ],
+  },
+  {
+    id: "products",
     label: "Products",
-    path: "/products",
     icon: FaBox,
+    items: [
+      {
+        label: "Products",
+        path: "/products",
+        icon: FaBox,
+      },
+      {
+        label: "Categories",
+        path: "/categories",
+        icon: FaTags,
+      },
+    ],
   },
   {
-    label: "Categories",
-    path: "/categories",
-    icon: FaTags,
-  },
-  {
-    label: "Suppliers",
-    path: "/suppliers",
+    id: "supply",
+    label: "Supply Chain",
     icon: FaTruck,
+    items: [
+      {
+        label: "Suppliers",
+        path: "/suppliers",
+        icon: FaTruck,
+      },
+      {
+        label: "Purchases",
+        path: "/purchases",
+        icon: FaShoppingCart,
+      },
+    ],
   },
   {
-    label: "Customers",
-    path: "/customers",
-    icon: FaUsers,
-  },
-  {
-    label: "Purchases",
-    path: "/purchases",
-    icon: FaShoppingCart,
-  },
-  {
+    id: "sales",
     label: "Sales",
-    path: "/sales",
     icon: FaChartLine,
+    items: [
+      {
+        label: "Sales",
+        path: "/sales",
+        icon: FaChartLine,
+      },
+    ],
   },
   {
+    id: "reports",
     label: "Reports",
-    path: "/reports",
     icon: FaFileAlt,
+    items: [
+      {
+        label: "Reports",
+        path: "/reports",
+        icon: FaFileAlt,
+      },
+    ],
   },
   {
-    label: "Inventory History",
-    path: "/inventory-history",
-    icon: FaHistory,
-  },
-  {
+    id: "notifications",
     label: "Notifications",
-    path: "/notifications",
     icon: FaBell,
+    items: [
+      {
+        label: "Notifications",
+        path: "/notifications",
+        icon: FaBell,
+      },
+    ],
   },
   {
+    id: "settings",
     label: "Settings",
-    path: "/settings",
     icon: FaCog,
+    items: [
+      {
+        label: "Settings",
+        path: "/settings",
+        icon: FaCog,
+      },
+    ],
   },
 ];
+
+// Keep old flat version for backward compatibility
+export const navItems = navGroups.flatMap((group) => group.items);
