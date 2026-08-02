@@ -5,6 +5,7 @@ import bcrypt
 from db_utils import get_connection, execute_transaction
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from itsdangerous import URLSafeTimedSerializer
 
 app = Flask(__name__)
 app.secret_key = "change_this_secret_key_later"
@@ -249,19 +250,69 @@ def create_order():
 
 # ---------- INVENTORY TRANSACTIONS (Stock In/Out) ----------
 @app.route('/api/inventory/transactions', methods=['GET'])
-@require_permission('orders.view')
 def get_inventory_transactions():
+    # Support both Bearer token and session-based auth
+    user_id = None
+    try:
+        user_id = get_user_id_from_bearer_token()
+    except Exception:
+        user_id = None
+    if not user_id:
+        # fall back to session
+        if 'user_id' in session:
+            user_id = session.get('user_id')
+        else:
+            return jsonify({"error": "Not logged in"}), 401
+
+    q_type = request.args.get('type')
+    q_product = request.args.get('productId')
+    start_date = request.args.get('startDate')
+    end_date = request.args.get('endDate')
+
     conn = get_connection()
     cur = conn.cursor(dictionary=True)
-    cur.execute("""
-        SELECT it.*, p.product_name FROM inventory_transactions it
-        JOIN products p ON it.product_id = p.product_id
-        ORDER BY it.transaction_id DESC
-    """)
-    data = cur.fetchall()
+    base_sql = "SELECT it.transaction_id, it.product_id, p.product_name, it.transaction_type, it.quantity, it.transaction_date, u.username, it.remarks FROM inventory_transactions it JOIN products p ON it.product_id = p.product_id LEFT JOIN users u ON it.user_id = u.user_id"
+    filters = []
+    params = []
+    if q_type:
+        filters.append("it.transaction_type = %s")
+        params.append(q_type)
+    if q_product:
+        filters.append("it.product_id = %s")
+        params.append(q_product)
+    if start_date:
+        filters.append("it.transaction_date >= %s")
+        params.append(start_date)
+    if end_date:
+        filters.append("it.transaction_date <= %s")
+        params.append(end_date)
+    if filters:
+        base_sql += " WHERE " + " AND ".join(filters)
+    base_sql += " ORDER BY it.transaction_id DESC"
+
+    cur.execute(base_sql, tuple(params))
+    rows = cur.fetchall()
     cur.close()
     conn.close()
-    return jsonify(data)
+
+    out = []
+    for r in rows:
+        td = r.get('transaction_date')
+        date_str = td.strftime('%Y-%m-%d') if hasattr(td, 'strftime') else str(td)
+        time_str = td.strftime('%H:%M:%S') if hasattr(td, 'strftime') else ''
+        ttype = (r.get('transaction_type') or '').upper().replace(' ', '_')
+        out.append({
+            "id": r.get('transaction_id'),
+            "productId": r.get('product_id'),
+            "productName": r.get('product_name'),
+            "type": ttype,
+            "quantity": r.get('quantity'),
+            "date": date_str,
+            "time": time_str,
+            "createdBy": r.get('username'),
+            "notes": r.get('remarks')
+        })
+    return jsonify(out)
 
 @app.route('/api/inventory/stock-in', methods=['POST'])
 @require_permission('products.update')
@@ -294,5 +345,366 @@ def stock_out():
     if result['success']:
         return jsonify({"message": "Stock out recorded"}), 201
     return jsonify({"error": result['error']}), 400
+# ----------------------
+# Token-based auth and frontend-compatible API
+# ----------------------
+
+serializer = URLSafeTimedSerializer(app.secret_key)
+
+def get_user_id_from_bearer_token():
+    auth = request.headers.get('Authorization', '')
+    if not auth or not auth.startswith('Bearer '):
+        return None
+    token = auth.split(' ', 1)[1].strip()
+    try:
+        payload = serializer.loads(token, max_age=86400)
+        return payload.get('user_id')
+    except Exception:
+        return None
+
+# AUTH endpoints for React frontend (Bearer token)
+@app.route('/api/auth/login', methods=['POST'])
+@limiter.limit("5 per minute")
+def api_auth_login():
+    data = request.json or {}
+    email = data.get('email')
+    password = data.get('password')
+
+    if not email or not password:
+        return jsonify({"success": False, "error": "Invalid credentials"}), 401
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+    user = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not user:
+        return jsonify({"success": False, "error": "Invalid credentials"}), 401
+
+    stored = user.get('password_hash')
+    password_ok = False
+    try:
+        password_ok = bcrypt.checkpw(password.encode(), stored.encode())
+    except Exception:
+        password_ok = (password == stored)
+
+    if not password_ok:
+        return jsonify({"success": False, "error": "Invalid credentials"}), 401
+
+    user_id = user.get('user_id')
+    token = serializer.dumps({"user_id": user_id})
+    user_obj = {
+        "id": str(user_id),
+        "name": f"{user.get('first_name','').strip()} {user.get('last_name','').strip()}".strip(),
+        "email": user.get('email'),
+        "role": (user.get('role') or '').lower()
+    }
+    return jsonify({"success": True, "user": user_obj, "token": token})
+
+
+@app.route('/api/auth/register', methods=['POST'])
+def api_auth_register():
+    data = request.json or {}
+    name = data.get('name','').strip()
+    email = data.get('email','').strip()
+    password = data.get('password','')
+
+    if not name or not email or not password:
+        return jsonify({"success": False, "error": "Missing fields"}), 400
+
+    parts = name.split()
+    first_name = parts[0]
+    last_name = ' '.join(parts[1:]) if len(parts) > 1 else ''
+
+    # create unique username from email prefix
+    base_username = email.split('@')[0]
+    username = base_username
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM users WHERE email = %s", (email,))
+    if cur.fetchone()[0] > 0:
+        cur.close()
+        conn.close()
+        return jsonify({"success": False, "error": "Email already registered"}), 409
+
+    # ensure username uniqueness
+    suffix = 0
+    while True:
+        cur.execute("SELECT COUNT(*) FROM users WHERE username = %s", (username,))
+        if cur.fetchone()[0] == 0:
+            break
+        suffix += 1
+        username = f"{base_username}{suffix}"
+
+    # find Staff role_id
+    cur.execute("SELECT role_id FROM roles WHERE role_name = %s LIMIT 1", ("Staff",))
+    row = cur.fetchone()
+    role_id = row[0] if row else None
+
+    pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+    try:
+        
+        cur.execute(
+            "INSERT INTO users (first_name, last_name, username, email, password_hash, role, role_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            (first_name, last_name, username, email, pw_hash, 'Staff', role_id)
+        )
+        new_id = cur.lastrowid
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        return jsonify({"success": False, "error": str(e)}), 400
+
+    cur.close()
+    conn.close()
+
+    token = serializer.dumps({"user_id": new_id})
+    user_obj = {
+        "id": str(new_id),
+        "name": f"{first_name} {last_name}".strip(),
+        "email": email,
+        "role": "staff"
+    }
+    return jsonify({"success": True, "user": user_obj, "token": token}), 201
+
+
+@app.route('/api/auth/verify', methods=['GET'])
+def api_auth_verify():
+    auth = request.headers.get('Authorization', '')
+    if not auth or not auth.startswith('Bearer '):
+        return jsonify({"success": False}), 401
+    token = auth.split(' ', 1)[1].strip()
+    try:
+        serializer.loads(token, max_age=86400)
+        return jsonify({"success": True})
+    except Exception:
+        return jsonify({"success": False}), 401
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def api_auth_logout():
+    return jsonify({"success": True})
+
+# INVENTORY endpoints for React frontend (token-based)
+@app.route('/api/inventory', methods=['GET'])
+def api_inventory_list():
+    user_id = get_user_id_from_bearer_token()
+    if not user_id:
+        return jsonify({"success": False}), 401
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute(
+        "SELECT p.product_id, p.product_name, p.sku, c.category_name, p.stock_quantity, p.reorder_level, p.selling_price, p.updated_at "
+        "FROM products p LEFT JOIN categories c ON p.category_id = c.category_id"
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    out = []
+    for r in rows:
+        stock = r.get('stock_quantity') or 0
+        reorder = r.get('reorder_level') or 0
+        if stock > reorder:
+            status = "Active"
+        elif stock > 0:
+            status = "Low Stock"
+        else:
+            status = "Out of Stock"
+        updated = r.get('updated_at')
+        last_updated = updated.isoformat() if hasattr(updated, 'isoformat') else (str(updated) if updated is not None else None)
+        out.append({
+            "id": r.get('product_id'),
+            "productName": r.get('product_name'),
+            "sku": r.get('sku'),
+            "category": r.get('category_name'),
+            "quantity": stock,
+            "reservedQuantity": 0,
+            "availableQuantity": stock,
+            "status": status,
+            "price": float(r.get('selling_price') or 0),
+            "lastUpdated": last_updated
+        })
+    return jsonify(out)
+
+
+@app.route('/api/inventory/low-stock', methods=['GET'])
+def api_inventory_low_stock():
+    user_id = get_user_id_from_bearer_token()
+    if not user_id:
+        return jsonify({"success": False}), 401
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute(
+        "SELECT p.product_id, p.product_name, p.sku, c.category_name, p.stock_quantity, p.reorder_level, p.selling_price, p.updated_at "
+        "FROM products p LEFT JOIN categories c ON p.category_id = c.category_id WHERE p.stock_quantity <= p.reorder_level"
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    out = []
+    for r in rows:
+        stock = r.get('stock_quantity') or 0
+        reorder = r.get('reorder_level') or 0
+        shortage = reorder - stock
+        updated = r.get('updated_at')
+        last_updated = updated.isoformat() if hasattr(updated, 'isoformat') else (str(updated) if updated is not None else None)
+        out.append({
+            "id": r.get('product_id'),
+            "productName": r.get('product_name'),
+            "sku": r.get('sku'),
+            "category": r.get('category_name'),
+            "quantity": stock,
+            "reservedQuantity": 0,
+            "availableQuantity": stock,
+            "status": "Low Stock" if stock > 0 else "Out of Stock",
+            "price": float(r.get('selling_price') or 0),
+            "lastUpdated": last_updated,
+            "shortage": shortage
+        })
+    return jsonify(out)
+
+
+@app.route('/api/inventory/stats', methods=['GET'])
+def api_inventory_stats():
+    user_id = get_user_id_from_bearer_token()
+    if not user_id:
+        return jsonify({"success": False}), 401
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM products")
+    total_items = cur.fetchone()[0]
+
+    cur.execute("SELECT COUNT(*) FROM products WHERE stock_quantity <= reorder_level AND stock_quantity > 0")
+    low_stock_count = cur.fetchone()[0]
+
+    cur.execute("SELECT COUNT(*) FROM products WHERE stock_quantity = 0")
+    out_of_stock = cur.fetchone()[0]
+
+    cur.execute("SELECT SUM(stock_quantity * selling_price) FROM products")
+    total_value = cur.fetchone()[0] or 0
+
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "totalItems": int(total_items),
+        "lowStockCount": int(low_stock_count),
+        "outOfStockCount": int(out_of_stock),
+        "totalValue": float(total_value)
+    })
+
+
+
+@app.route('/api/inventory/in', methods=['POST'])
+def api_inventory_in():
+    user_id = get_user_id_from_bearer_token()
+    if not user_id:
+        return jsonify({"success": False}), 401
+
+    data = request.json or {}
+    product_id = data.get('productId')
+    quantity = data.get('quantity')
+    notes = data.get('notes','')
+
+    if not product_id or not isinstance(quantity, (int, float)) or quantity <= 0:
+        return jsonify({"success": False, "error": "Invalid quantity"}), 400
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        conn.start_transaction()
+        cur.execute("SET @current_user_id = %s", (user_id,))
+        cur.execute("INSERT INTO inventory_transactions (product_id, user_id, transaction_type, quantity, remarks) VALUES (%s,%s,'Stock In',%s,%s)", (product_id, user_id, quantity, notes))
+        trans_id = cur.lastrowid
+        cur.execute("UPDATE products SET stock_quantity = stock_quantity + %s WHERE product_id = %s", (quantity, product_id))
+        conn.commit()
+        return jsonify({"success": True, "id": trans_id, "type": "STOCK_IN", "date": __import__('datetime').date.today().strftime('%Y-%m-%d')}), 201
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "error": str(e)}), 400
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route('/api/inventory/out', methods=['POST'])
+def api_inventory_out():
+    user_id = get_user_id_from_bearer_token()
+    if not user_id:
+        return jsonify({"success": False}), 401
+
+    data = request.json or {}
+    product_id = data.get('productId')
+    quantity = data.get('quantity')
+    notes = data.get('notes','')
+
+    if not product_id or not isinstance(quantity, (int, float)) or quantity <= 0:
+        return jsonify({"success": False, "error": "Invalid quantity"}), 400
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        conn.start_transaction()
+        cur.execute("SET @current_user_id = %s", (user_id,))
+        cur.execute("INSERT INTO inventory_transactions (product_id, user_id, transaction_type, quantity, remarks) VALUES (%s,%s,'Stock Out',%s,%s)", (product_id, user_id, quantity, notes))
+        trans_id = cur.lastrowid
+        cur.execute("UPDATE products SET stock_quantity = stock_quantity - %s WHERE product_id = %s AND stock_quantity >= %s", (quantity, product_id, quantity))
+        if cur.rowcount == 0:
+            conn.rollback()
+            return jsonify({"success": False, "error": "Insufficient stock"}), 400
+        conn.commit()
+        return jsonify({"success": True, "id": trans_id, "type": "STOCK_OUT", "date": __import__('datetime').date.today().strftime('%Y-%m-%d')}), 201
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "error": str(e)}), 400
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route('/api/inventory/adjust', methods=['POST'])
+def api_inventory_adjust():
+    user_id = get_user_id_from_bearer_token()
+    if not user_id:
+        return jsonify({"success": False}), 401
+
+    data = request.json or {}
+    product_id = data.get('productId')
+    delta = data.get('quantity')
+    reason = data.get('reason','')
+
+    if not product_id or not isinstance(delta, (int, float)):
+        return jsonify({"success": False, "error": "Invalid quantity"}), 400
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        conn.start_transaction()
+        cur.execute("SET @current_user_id = %s", (user_id,))
+        cur.execute("INSERT INTO inventory_transactions (product_id, user_id, transaction_type, quantity, remarks) VALUES (%s,%s,'Adjustment',%s,%s)", (product_id, user_id, abs(delta), reason))
+        trans_id = cur.lastrowid
+        cur.execute("UPDATE products SET stock_quantity = stock_quantity + %s WHERE product_id = %s AND (stock_quantity + %s) >= 0", (delta, product_id, delta))
+        if cur.rowcount == 0:
+            conn.rollback()
+            return jsonify({"success": False, "error": "Resulting stock would be negative"}), 400
+        conn.commit()
+        return jsonify({"success": True, "id": trans_id, "type": "ADJUSTMENT", "date": __import__('datetime').date.today().strftime('%Y-%m-%d')}), 201
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "error": str(e)}), 400
+    finally:
+        cur.close()
+        conn.close()
+
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
