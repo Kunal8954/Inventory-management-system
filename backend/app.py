@@ -13,7 +13,10 @@ load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY")
-CORS(app, supports_credentials=True, resources={r"/*": {"origins": "http://localhost:5173"}})
+CORS(app, supports_credentials=True, resources={r"/*": {"origins": [
+    "http://localhost:5173",
+    "https://*.vercel.app",
+]}})
 limiter = Limiter(get_remote_address, app=app, default_limits=["200 per hour"])
 
 # ----------------------
@@ -239,7 +242,7 @@ def create_purchase_order():
     finally:
         cur.close()
         conn.close()
-        
+
 @app.route('/api/customers', methods=['GET'])
 def get_customers():
     conn = get_connection()
