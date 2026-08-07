@@ -14,7 +14,8 @@ from itsdangerous import URLSafeTimedSerializer
 
 load_dotenv()
 
-from flask_cors import CORS
+app = Flask(__name__)
+app.secret_key = os.getenv("SECRET_KEY")
 
 CORS(
     app,
