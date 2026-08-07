@@ -4,8 +4,7 @@ from functools import wraps
 import bcrypt
 import os
 import random
-import smtplib
-from email.mime.text import MIMEText
+import resend
 from datetime import datetime
 from dotenv import load_dotenv
 from db_utils import get_connection, execute_transaction
@@ -22,6 +21,8 @@ CORS(app, supports_credentials=True, resources={r"/*": {"origins": [
     "https://*.vercel.app",
 ]}})
 limiter = Limiter(get_remote_address, app=app, default_limits=["200 per hour"])
+
+resend.api_key = os.getenv("RESEND_API_KEY")
 
 # ----------------------
 # Token helpers (moved up so require_permission can use them)
@@ -40,25 +41,19 @@ def get_user_id_from_bearer_token():
         return None
 
 # ----------------------
-# Email helper (Gmail SMTP, used for OTP verification)
+# Email helper (Resend API, used for OTP verification)
 # ----------------------
 def send_otp_email(to_email, otp_code):
-    gmail_user = os.getenv("GMAIL_USER")
-    gmail_password = os.getenv("GMAIL_APP_PASSWORD")
-
-    msg = MIMEText(
-        f"Your StockPilot verification code is: {otp_code}\n\n"
-        f"This code expires in 10 minutes.\n\n"
-        f"If you did not request this, you can safely ignore this email."
-    )
-    msg['Subject'] = 'StockPilot - Verify your email'
-    msg['From'] = gmail_user
-    msg['To'] = to_email
-
-    with smtplib.SMTP('smtp.gmail.com', 587) as server:
-        server.starttls()
-        server.login(gmail_user, gmail_password)
-        server.send_message(msg)
+    resend.Emails.send({
+        "from": "StockPilot <noreply@kunalsharm.me>",
+        "to": [to_email],
+        "subject": "StockPilot - Verify your email",
+        "text": (
+            f"Your StockPilot verification code is: {otp_code}\n\n"
+            f"This code expires in 10 minutes.\n\n"
+            f"If you did not request this, you can safely ignore this email."
+        ),
+    })
 
 # ---------- Helper: permission-check decorator (Bearer-token based) ----------
 def require_permission(permission_name):
