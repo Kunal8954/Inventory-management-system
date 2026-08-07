@@ -1,26 +1,19 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-
-const getAuthHeaders = () => {
-  const token = localStorage.getItem('authToken');
-  return token ? { Authorization: `Bearer ${token}` } : {};
-};
+import { api } from './api';
 
 export const fetchSuppliers = async () => {
   try {
-    const res = await fetch(`${API_BASE_URL}/suppliers`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAuthHeaders(),
-      },
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Failed to fetch suppliers: ${res.status} ${res.statusText} ${text}`);
-    }
-
-    return await res.json();
+    return await api.get('/suppliers');
   } catch (error) {
-    throw new Error(`Failed to fetch suppliers: ${error.message}`);
+    throw new Error(error.message || 'Failed to fetch suppliers');
   }
 };
+
+export const createSupplier = async (payload) => {
+  try {
+    return await api.post('/suppliers', payload);
+  } catch (error) {
+    throw new Error(error.message || 'Failed to create supplier');
+  }
+};
+
+export default { fetchSuppliers, createSupplier };

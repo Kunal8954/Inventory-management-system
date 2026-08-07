@@ -117,7 +117,7 @@ const InventoryTable = ({ data, searchQuery, onSearchChange }) => {
                   } size="sm" />
                 </td>
                 <td className="px-6 py-4 text-sm text-slate-600">
-                  {formatCurrency(item.unitPrice)}
+                  {formatCurrency(item.price)}
                 </td>
                 <td className="px-6 py-4 text-sm text-slate-600">
                   {formatDate(item.lastUpdated)}

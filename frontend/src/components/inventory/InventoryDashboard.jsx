@@ -21,6 +21,9 @@ import {
   fetchLowStockAlerts,
   fetchTransactions,
   fetchInventoryStats,
+  createStockIn,
+  createStockOut,
+  exportInventoryToCSV,
 } from '../../services/inventoryService';
 import { formatCurrency } from '../../utils/formatters';
 import InventoryStats from './InventoryStats';
@@ -46,99 +49,79 @@ const InventoryDashboard = () => {
     10
   );
 
-  // Load initial data
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        setIsLoading(true);
-        const [invData, txnData, alertsData, statsData] = await Promise.all([
-          fetchInventory(),
-          fetchTransactions(),
-          fetchLowStockAlerts(),
-          fetchInventoryStats(),
-        ]);
+  const loadData = async () => {
+    try {
+      setIsLoading(true);
+      const [invData, txnData, alertsData, statsData] = await Promise.all([
+        fetchInventory(),
+        fetchTransactions(),
+        fetchLowStockAlerts(),
+        fetchInventoryStats(),
+      ]);
 
-        setInventory(invData);
-        setTransactions(txnData);
-        setLowStockAlerts(alertsData);
-        setStats(statsData);
-      } catch (error) {
-        showError(error.message || 'Failed to load inventory data');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadData();
-  }, [showError]);
-
-  // Handle stock in
-  const handleStockIn = (data) => {
-    // Simulate transaction creation
-    const newTransaction = {
-      id: transactions.length + 1,
-      type: 'STOCK_IN',
-      date: new Date().toISOString().split('T')[0],
-      time: new Date().toLocaleTimeString(),
-      ...data,
-    };
-
-    setTransactions([newTransaction, ...transactions]);
-    showSuccess('Stock In recorded successfully!');
-    setShowStockInModal(false);
-
-    // Update inventory
-    const updatedInventory = inventory.map((item) => {
-      if (item.productId === parseInt(data.productId)) {
-        return {
-          ...item,
-          quantity: item.quantity + parseInt(data.quantity),
-          availableQuantity: item.availableQuantity + parseInt(data.quantity),
-          lastUpdated: new Date().toISOString().split('T')[0],
-        };
-      }
-      return item;
-    });
-    setInventory(updatedInventory);
-  };
-
-  // Handle stock out
-  const handleStockOut = (data) => {
-    // Check if sufficient stock available
-    const product = inventory.find((p) => p.productId === parseInt(data.productId));
-    if (!product || product.availableQuantity < data.quantity) {
-      showError('Insufficient stock available!');
-      return;
+      setInventory(invData);
+      setTransactions(txnData);
+      setLowStockAlerts(alertsData);
+      setStats(statsData);
+    } catch (error) {
+      showError(error.message || 'Failed to load inventory data');
+    } finally {
+      setIsLoading(false);
     }
-
-    const newTransaction = {
-      id: transactions.length + 1,
-      type: 'STOCK_OUT',
-      date: new Date().toISOString().split('T')[0],
-      time: new Date().toLocaleTimeString(),
-      ...data,
-    };
-
-    setTransactions([newTransaction, ...transactions]);
-    showSuccess('Stock Out recorded successfully!');
-    setShowStockOutModal(false);
-
-    // Update inventory
-    const updatedInventory = inventory.map((item) => {
-      if (item.productId === parseInt(data.productId)) {
-        return {
-          ...item,
-          quantity: item.quantity - parseInt(data.quantity),
-          availableQuantity: item.availableQuantity - parseInt(data.quantity),
-          lastUpdated: new Date().toISOString().split('T')[0],
-        };
-      }
-      return item;
-    });
-    setInventory(updatedInventory);
   };
 
-  // Filter inventory based on search
+  useEffect(() => {
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const refreshData = async () => {
+    try {
+      const [invData, txnData, alertsData, statsData] = await Promise.all([
+        fetchInventory(),
+        fetchTransactions(),
+        fetchLowStockAlerts(),
+        fetchInventoryStats(),
+      ]);
+      setInventory(invData);
+      setTransactions(txnData);
+      setLowStockAlerts(alertsData);
+      setStats(statsData);
+    } catch (error) {
+      showError(error.message || 'Failed to refresh inventory data');
+    }
+  };
+
+  const handleStockIn = async (data) => {
+    try {
+      await createStockIn({
+        productId: parseInt(data.productId),
+        quantity: parseInt(data.quantity),
+        notes: data.notes || '',
+      });
+      showSuccess('Stock In recorded successfully!');
+      setShowStockInModal(false);
+      await refreshData();
+    } catch (error) {
+      showError(error.message || 'Failed to record stock in');
+    }
+  };
+
+  const handleStockOut = async (data) => {
+    try {
+      await createStockOut({
+        productId: parseInt(data.productId),
+        quantity: parseInt(data.quantity),
+        notes: data.reason ? `${data.reason}${data.notes ? ' - ' + data.notes : ''}` : (data.notes || ''),
+      });
+      showSuccess('Stock Out recorded successfully!');
+      setShowStockOutModal(false);
+      await refreshData();
+    } catch (error) {
+      showError(error.message || 'Failed to record stock out');
+    }
+  };
+
   const filteredInventory = inventory.filter(
     (item) =>
       item.productName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -154,13 +137,11 @@ const InventoryDashboard = () => {
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-slate-900 mb-2">Inventory Management</h1>
           <p className="text-slate-600">Track and manage your stock levels in real-time</p>
         </div>
 
-        {/* Action Buttons */}
         <div className="mb-6 flex gap-3 flex-wrap">
           <Button
             variant="primary"
@@ -176,12 +157,15 @@ const InventoryDashboard = () => {
           >
             <FiMinus size={20} /> Stock Out
           </Button>
-          <Button variant="outline" className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            className="flex items-center gap-2"
+            onClick={() => exportInventoryToCSV(filteredInventory, 'inventory.csv')}
+          >
             <FiDownload size={20} /> Export CSV
           </Button>
         </div>
 
-        {/* Tabs */}
         <div className="flex gap-4 mb-6 border-b border-slate-200">
           {[
             { id: 'overview', label: 'Overview', icon: FiPackage },
@@ -202,7 +186,6 @@ const InventoryDashboard = () => {
           ))}
         </div>
 
-        {/* Content */}
         <div>
           {isLoading ? (
             <Skeleton count={5} height="h-12" />
@@ -222,7 +205,6 @@ const InventoryDashboard = () => {
           )}
         </div>
 
-        {/* Modals */}
         <Modal
           isOpen={showStockInModal}
           title="Stock In"
@@ -249,7 +231,6 @@ const InventoryDashboard = () => {
           />
         </Modal>
 
-        {/* Notification */}
         {notification && (
           <Notification
             message={notification.message}

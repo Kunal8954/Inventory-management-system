@@ -60,7 +60,7 @@ export default function Sales() {
         </div>
         <div className="bg-white shadow rounded-lg p-4">
           <div className="text-sm text-slate-500">Total Revenue</div>
-          <div className="text-2xl font-semibold">{totalRevenue.toLocaleString(undefined, { style: 'currency', currency: 'USD' })}</div>
+          <div className="text-2xl font-semibold">{totalRevenue.toLocaleString('en-IN', { style: 'currency', currency: 'INR' })}</div>
         </div>
         <div className="bg-white shadow rounded-lg p-4">
           <div className="text-sm text-slate-500">Pending Orders</div>
@@ -85,7 +85,7 @@ export default function Sales() {
               <tr key={o.order_id || o.id} className="border-b last:border-b-0">
                 <td className="px-6 py-4">{o.order_id || o.id}</td>
                 <td className="px-6 py-4">{o.customer_name || o.customer || '-'}</td>
-                <td className="px-6 py-4">{(o.total_amount || o.total || 0).toLocaleString ? (o.total_amount || o.total || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD' }) : o.total_amount || o.total || 0}</td>
+                <td className="px-6 py-4">{(o.total_amount || o.total || 0).toLocaleString ? (o.total_amount || o.total || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' }) : o.total_amount || o.total || 0}</td>
                 <td className="px-6 py-4">{o.payment_status || o.paymentStatus || '-'}</td>
                 <td className="px-6 py-4">{o.order_status || o.status || '-'}</td>
                 <td className="px-6 py-4">{(o.order_date || o.created_at || o.createdAt) ? new Date(o.order_date || o.created_at || o.createdAt).toLocaleString() : '-'}</td>

@@ -29,7 +29,7 @@ const InventoryStats = ({ stats }) => {
     },
     {
       title: 'Inventory Value',
-      value: formatCurrency(stats.totalInventoryValue),
+      value: formatCurrency(stats.totalValue),
       icon: FiDollarSign,
       color: 'text-green-600',
       bgColor: 'bg-green-50',

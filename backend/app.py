@@ -1,23 +1,44 @@
-from flask import Flask, jsonify, request, session
+from flask import Flask, jsonify, request, g
 from flask_cors import CORS
 from functools import wraps
 import bcrypt
+import os
+from dotenv import load_dotenv
 from db_utils import get_connection, execute_transaction
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from itsdangerous import URLSafeTimedSerializer
 
+load_dotenv()
+
 app = Flask(__name__)
-app.secret_key = "change_this_secret_key_later"
-CORS(app, supports_credentials=True)
+app.secret_key = os.getenv("SECRET_KEY")
+CORS(app, supports_credentials=True, resources={r"/*": {"origins": "http://localhost:5173"}})
 limiter = Limiter(get_remote_address, app=app, default_limits=["200 per hour"])
 
-# ---------- Helper: permission-check decorator ----------
+# ----------------------
+# Token helpers (moved up so require_permission can use them)
+# ----------------------
+serializer = URLSafeTimedSerializer(app.secret_key)
+
+def get_user_id_from_bearer_token():
+    auth = request.headers.get('Authorization', '')
+    if not auth or not auth.startswith('Bearer '):
+        return None
+    token = auth.split(' ', 1)[1].strip()
+    try:
+        payload = serializer.loads(token, max_age=86400)
+        return payload.get('user_id')
+    except Exception:
+        return None
+
+# ---------- Helper: permission-check decorator (Bearer-token based) ----------
 def require_permission(permission_name):
     def decorator(f):
         @wraps(f)
         def wrapped(*args, **kwargs):
-            if 'user_id' not in session:
+            user_id = get_user_id_from_bearer_token()
+            if not user_id:
                 return jsonify({"error": "Not logged in"}), 401
             conn = get_connection()
             cur = conn.cursor()
@@ -26,59 +47,16 @@ def require_permission(permission_name):
                 JOIN role_permissions rp ON u.role_id = rp.role_id
                 JOIN permissions p ON rp.permission_id = p.permission_id
                 WHERE u.user_id = %s
-            """, (session['user_id'],))
+            """, (user_id,))
             perms = [row[0] for row in cur.fetchall()]
             cur.close()
             conn.close()
             if permission_name not in perms:
                 return jsonify({"error": f"Forbidden - missing permission: {permission_name}"}), 403
+            g.user_id = user_id
             return f(*args, **kwargs)
         return wrapped
     return decorator
-
-# ---------- AUTH ----------
-@app.route('/api/login', methods=['POST'])
-@limiter.limit("5 per minute")
-def login():
-    data = request.json
-    username = data.get('username')
-    password = data.get('password')
-
-    conn = get_connection()
-    cur = conn.cursor(dictionary=True)
-    cur.execute("SELECT * FROM users WHERE username = %s", (username,))
-    user = cur.fetchone()
-    cur.close()
-    conn.close()
-
-    if not user:
-        return jsonify({"error": "Invalid credentials"}), 401
-
-    stored = user['password_hash']
-    password_ok = False
-    try:
-        password_ok = bcrypt.checkpw(password.encode(), stored.encode())
-    except Exception:
-        # fallback for old test rows saved as plain text (e.g. 'placeholder_hash')
-        password_ok = (password == stored)
-
-    if not password_ok:
-        return jsonify({"error": "Invalid credentials"}), 401
-
-    session['user_id'] = user['user_id']
-    session['role_id'] = user['role_id']
-    return jsonify({"message": "Logged in", "username": user['username'], "role": user['role']})
-
-@app.route('/api/logout', methods=['POST'])
-def logout():
-    session.clear()
-    return jsonify({"message": "Logged out"})
-
-@app.route('/api/me', methods=['GET'])
-def me():
-    if 'user_id' not in session:
-        return jsonify({"error": "Not logged in"}), 401
-    return jsonify({"user_id": session['user_id'], "role_id": session['role_id']})
 
 # ---------- PRODUCTS ----------
 @app.route('/api/products', methods=['GET'])
@@ -112,7 +90,7 @@ def create_product():
             VALUES (%s,%s,%s,%s,%s,%s,%s)""",
          (data['sku'], data['product_name'], data['category_id'], data['supplier_id'],
           data['cost_price'], data['selling_price'], data.get('stock_quantity', 0)))
-    ], user_id=session.get('user_id'))
+    ], user_id=g.user_id)
 
     if result['success']:
         return jsonify({"message": "Product created"}), 201
@@ -125,7 +103,7 @@ def update_product(product_id):
     result = execute_transaction([
         ("""UPDATE products SET stock_quantity = %s, selling_price = %s WHERE product_id = %s""",
          (data['stock_quantity'], data['selling_price'], product_id))
-    ], user_id=session.get('user_id'))
+    ], user_id=g.user_id)
 
     if result['success']:
         return jsonify({"message": "Product updated"})
@@ -136,13 +114,13 @@ def update_product(product_id):
 def delete_product(product_id):
     result = execute_transaction([
         ("DELETE FROM products WHERE product_id = %s", (product_id,))
-    ], user_id=session.get('user_id'))
+    ], user_id=g.user_id)
 
     if result['success']:
         return jsonify({"message": "Product deleted"})
     return jsonify({"error": result['error']}), 400
 
-# ---------- HEALTH CHECK (small preview of Phase 5) ----------
+# ---------- HEALTH CHECK ----------
 @app.route('/health', methods=['GET'])
 def health():
     try:
@@ -151,6 +129,7 @@ def health():
         return jsonify({"status": "ok"}), 200
     except Exception:
         return jsonify({"status": "db_unreachable"}), 500
+
 # ---------- CATEGORIES ----------
 @app.route('/api/categories', methods=['GET'])
 def get_categories():
@@ -173,7 +152,94 @@ def get_suppliers():
     conn.close()
     return jsonify(data)
 
+@app.route('/api/categories', methods=['POST'])
+@require_permission('products.create')
+def create_category():
+    data = request.json or {}
+    name = (data.get('category_name') or data.get('name') or '').strip()
+    if not name:
+        return jsonify({"error": "category_name is required"}), 400
+    result = execute_transaction([
+        ("INSERT INTO categories (category_name, description) VALUES (%s,%s)",
+         (name, data.get('description', '')))
+    ], user_id=g.user_id)
+    if result['success']:
+        return jsonify({"message": "Category created"}), 201
+    return jsonify({"error": result['error']}), 400
+
+
+@app.route('/api/suppliers', methods=['POST'])
+@require_permission('products.create')
+def create_supplier():
+    data = request.json or {}
+    name = (data.get('supplier_name') or data.get('name') or '').strip()
+    if not name:
+        return jsonify({"error": "supplier_name is required"}), 400
+    result = execute_transaction([
+        ("""INSERT INTO suppliers
+            (supplier_name, contact_person, email, phone, city, state, country, gst_number, status)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+         (name, data.get('contact_person', ''), data.get('email', ''), data.get('phone', ''),
+          data.get('city', ''), data.get('state', ''), data.get('country', 'India'),
+          data.get('gst_number', ''), data.get('status', 'Active')))
+    ], user_id=g.user_id)
+    if result['success']:
+        return jsonify({"message": "Supplier created"}), 201
+    return jsonify({"error": result['error']}), 400
+
 # ---------- CUSTOMERS ----------
+# ---------- PURCHASE ORDERS ----------
+@app.route('/api/purchase-orders', methods=['GET'])
+@require_permission('orders.view')
+def get_purchase_orders():
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("""
+        SELECT po.*, s.supplier_name FROM purchase_orders po
+        JOIN suppliers s ON po.supplier_id = s.supplier_id
+        ORDER BY po.purchase_order_id DESC
+    """)
+    data = cur.fetchall()
+    cur.close()
+    conn.close()
+    return jsonify(data)
+
+@app.route('/api/purchase-orders', methods=['POST'])
+@require_permission('orders.create')
+def create_purchase_order():
+    data = request.json or {}
+    user_id = g.user_id
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SET @current_user_id = %s", (user_id,))
+        conn.start_transaction()
+
+        cur.execute(
+            "INSERT INTO purchase_orders (supplier_id, user_id, total_amount, payment_status, purchase_status) VALUES (%s,%s,%s,%s,%s)",
+            (data['supplier_id'], user_id, data.get('total_amount', 0),
+             data.get('payment_status', 'Pending'), data.get('purchase_status', 'Pending'))
+        )
+        po_id = cur.lastrowid
+
+        for item in data.get('items', []):
+            cur.execute(
+                """INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, unit_cost, subtotal)
+                   VALUES (%s,%s,%s,%s,%s)""",
+                (po_id, item['product_id'], item['quantity'], item['unit_cost'],
+                 item['quantity'] * item['unit_cost'])
+            )
+
+        conn.commit()
+        return jsonify({"message": "Purchase order created", "purchase_order_id": po_id}), 201
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 400
+    finally:
+        cur.close()
+        conn.close()
+        
 @app.route('/api/customers', methods=['GET'])
 def get_customers():
     conn = get_connection()
@@ -192,7 +258,7 @@ def create_customer():
         ("""INSERT INTO customers (customer_name, email, phone, customer_type)
             VALUES (%s,%s,%s,%s)""",
          (data['customer_name'], data.get('email'), data.get('phone'), data.get('customer_type', 'Individual')))
-    ])
+    ], user_id=g.user_id)
     if result['success']:
         return jsonify({"message": "Customer created"}), 201
     return jsonify({"error": result['error']}), 400
@@ -217,7 +283,7 @@ def get_orders():
 @require_permission('orders.create')
 def create_order():
     data = request.json
-    user_id = session.get('user_id')
+    user_id = g.user_id
 
     conn = get_connection()
     cur = conn.cursor()
@@ -248,21 +314,12 @@ def create_order():
         cur.close()
         conn.close()
 
-# ---------- INVENTORY TRANSACTIONS (Stock In/Out) ----------
+# ---------- INVENTORY TRANSACTIONS (Stock In/Out log) ----------
 @app.route('/api/inventory/transactions', methods=['GET'])
 def get_inventory_transactions():
-    # Support both Bearer token and session-based auth
-    user_id = None
-    try:
-        user_id = get_user_id_from_bearer_token()
-    except Exception:
-        user_id = None
+    user_id = get_user_id_from_bearer_token()
     if not user_id:
-        # fall back to session
-        if 'user_id' in session:
-            user_id = session.get('user_id')
-        else:
-            return jsonify({"error": "Not logged in"}), 401
+        return jsonify({"error": "Not logged in"}), 401
 
     q_type = request.args.get('type')
     q_product = request.args.get('productId')
@@ -318,7 +375,7 @@ def get_inventory_transactions():
 @require_permission('products.update')
 def stock_in():
     data = request.json
-    user_id = session.get('user_id')
+    user_id = g.user_id
     result = execute_transaction([
         ("""INSERT INTO inventory_transactions (product_id, user_id, transaction_type, quantity, remarks)
             VALUES (%s,%s,'Stock In',%s,%s)""",
@@ -334,7 +391,7 @@ def stock_in():
 @require_permission('products.update')
 def stock_out():
     data = request.json
-    user_id = session.get('user_id')
+    user_id = g.user_id
     result = execute_transaction([
         ("""INSERT INTO inventory_transactions (product_id, user_id, transaction_type, quantity, remarks)
             VALUES (%s,%s,'Stock Out',%s,%s)""",
@@ -345,24 +402,10 @@ def stock_out():
     if result['success']:
         return jsonify({"message": "Stock out recorded"}), 201
     return jsonify({"error": result['error']}), 400
+
 # ----------------------
-# Token-based auth and frontend-compatible API
+# AUTH endpoints for React frontend (Bearer token) — the ONLY auth system now
 # ----------------------
-
-serializer = URLSafeTimedSerializer(app.secret_key)
-
-def get_user_id_from_bearer_token():
-    auth = request.headers.get('Authorization', '')
-    if not auth or not auth.startswith('Bearer '):
-        return None
-    token = auth.split(' ', 1)[1].strip()
-    try:
-        payload = serializer.loads(token, max_age=86400)
-        return payload.get('user_id')
-    except Exception:
-        return None
-
-# AUTH endpoints for React frontend (Bearer token)
 @app.route('/api/auth/login', methods=['POST'])
 @limiter.limit("5 per minute")
 def api_auth_login():
@@ -418,7 +461,6 @@ def api_auth_register():
     first_name = parts[0]
     last_name = ' '.join(parts[1:]) if len(parts) > 1 else ''
 
-    # create unique username from email prefix
     base_username = email.split('@')[0]
     username = base_username
     conn = get_connection()
@@ -429,7 +471,6 @@ def api_auth_register():
         conn.close()
         return jsonify({"success": False, "error": "Email already registered"}), 409
 
-    # ensure username uniqueness
     suffix = 0
     while True:
         cur.execute("SELECT COUNT(*) FROM users WHERE username = %s", (username,))
@@ -438,7 +479,6 @@ def api_auth_register():
         suffix += 1
         username = f"{base_username}{suffix}"
 
-    # find Staff role_id
     cur.execute("SELECT role_id FROM roles WHERE role_name = %s LIMIT 1", ("Staff",))
     row = cur.fetchone()
     role_id = row[0] if row else None
@@ -446,7 +486,6 @@ def api_auth_register():
     pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
     try:
-        
         cur.execute(
             "INSERT INTO users (first_name, last_name, username, email, password_hash, role, role_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",
             (first_name, last_name, username, email, pw_hash, 'Staff', role_id)
@@ -474,15 +513,10 @@ def api_auth_register():
 
 @app.route('/api/auth/verify', methods=['GET'])
 def api_auth_verify():
-    auth = request.headers.get('Authorization', '')
-    if not auth or not auth.startswith('Bearer '):
+    user_id = get_user_id_from_bearer_token()
+    if not user_id:
         return jsonify({"success": False}), 401
-    token = auth.split(' ', 1)[1].strip()
-    try:
-        serializer.loads(token, max_age=86400)
-        return jsonify({"success": True})
-    except Exception:
-        return jsonify({"success": False}), 401
+    return jsonify({"success": True})
 
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -603,7 +637,6 @@ def api_inventory_stats():
     })
 
 
-
 @app.route('/api/inventory/in', methods=['POST'])
 def api_inventory_in():
     user_id = get_user_id_from_bearer_token()
@@ -707,4 +740,4 @@ def api_inventory_adjust():
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5000)

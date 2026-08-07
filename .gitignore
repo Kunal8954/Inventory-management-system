@@ -3,3 +3,4 @@ cookies.txt
 backend/cookies.txt
 __pycache__/
 *.pyc
+backend/app.py.backup

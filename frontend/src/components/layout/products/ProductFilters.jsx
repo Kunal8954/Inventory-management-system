@@ -8,6 +8,7 @@ const ProductFilters = ({
   status,
   setStatus,
   onReset,
+  categories = [],
 }) => {
   return (
     <div className="bg-white rounded-xl shadow-sm p-6">
@@ -36,10 +37,11 @@ const ProductFilters = ({
           className="rounded-lg border border-gray-200 px-4 py-2.5 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition"
         >
           <option value="All">All</option>
-          <option value="Electronics">Electronics</option>
-          <option value="Accessories">Accessories</option>
-          <option value="Furniture">Furniture</option>
-          <option value="Storage">Storage</option>
+          {categories.map((item) => (
+            <option key={item} value={item}>
+              {item}
+            </option>
+          ))}
         </select>
 
         {/* Status */}

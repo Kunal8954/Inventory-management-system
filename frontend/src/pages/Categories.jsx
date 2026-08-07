@@ -1,16 +1,34 @@
 import { useEffect, useState } from 'react';
-import { EmptyState, Skeleton, Button } from '../components/common';
-import { fetchCategories } from '../services/categoryService';
+import { EmptyState, Skeleton, Button, Modal, Notification } from '../components/common';
+import { fetchCategories, createCategory } from '../services/categoryService';
 
 export default function Categories() {
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState(null);
+  const [notification, setNotification] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const data = await fetchCategories();
+      setCategories(data || []);
+      setError(null);
+    } catch (err) {
+      setError(err.message || 'Failed to load categories');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
-    const load = async () => {
-      setLoading(true);
+    (async () => {
       try {
         const data = await fetchCategories();
         if (!mounted) return;
@@ -22,14 +40,91 @@ export default function Categories() {
         if (!mounted) return;
         setLoading(false);
       }
-    };
-    load();
+    })();
     return () => {
       mounted = false;
     };
   }, []);
 
   const getDate = (c) => c.created_at || c.createdAt || c.created || c.date || '';
+
+  const handleClose = () => {
+    setIsOpen(false);
+    setName('');
+    setDescription('');
+    setFormError(null);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setFormError(null);
+
+    if (!name.trim()) {
+      setFormError('Category name is required.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await createCategory({ category_name: name.trim(), description: description.trim() });
+      handleClose();
+      setNotification({ type: 'success', message: 'Category created successfully' });
+      setTimeout(() => setNotification(null), 3000);
+      await load();
+    } catch (err) {
+      setFormError(err.message || 'Failed to create category');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const addModal = (
+    <Modal isOpen={isOpen} title="Add Category" onClose={handleClose} size="md">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {formError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+            {formError}
+          </div>
+        )}
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Name *</label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-accent-500 focus:outline-none"
+            placeholder="e.g. Electronics"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows="3"
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-accent-500 focus:outline-none"
+            placeholder="Optional description"
+          />
+        </div>
+        <div className="flex justify-end gap-3 border-t pt-4">
+          <Button variant="secondary" type="button" onClick={handleClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button variant="primary" type="submit" isLoading={submitting}>
+            Create Category
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+
+  const notificationBanner = notification && (
+    <Notification
+      message={notification.message}
+      type={notification.type}
+      onClose={() => setNotification(null)}
+    />
+  );
 
   if (loading) {
     return (
@@ -57,18 +152,25 @@ export default function Categories() {
           title="No categories yet"
           description="Organize products by categories to make filtering and reporting easier."
           action={
-            <a href="/categories/new">
-              <Button variant="primary">Add Category</Button>
-            </a>
+            <Button variant="primary" onClick={() => setIsOpen(true)}>
+              Add Category
+            </Button>
           }
         />
+        {addModal}
+        {notificationBanner}
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold text-slate-900">Categories</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold text-slate-900">Categories</h1>
+        <Button variant="primary" onClick={() => setIsOpen(true)}>
+          Add Category
+        </Button>
+      </div>
 
       <div className="bg-white shadow rounded-lg overflow-x-auto">
         <table className="w-full text-left table-auto">
@@ -92,7 +194,9 @@ export default function Categories() {
           </tbody>
         </table>
       </div>
+
+      {addModal}
+      {notificationBanner}
     </div>
   );
 }
-

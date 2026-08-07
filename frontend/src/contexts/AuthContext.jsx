@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
+import { authService } from '../services/authService';
 
 const AuthContext = createContext(null);
 
@@ -7,47 +8,117 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState(localStorage.getItem('authToken'));
 
-  useEffect(() => {
-    // Check if user is already logged in
-    const storedUser = localStorage.getItem('user');
-    const storedToken = localStorage.getItem('authToken');
-    
-    if (storedToken && storedUser) {
-      setUser(JSON.parse(storedUser));
-      setToken(storedToken);
+  const normalizeUser = (value) => {
+    if (!value || typeof value !== 'object') {
+      return null;
     }
-    setLoading(false);
+
+    if (value.user && typeof value.user === 'object') {
+      return value.user;
+    }
+
+    if (value.id || value.name || value.email || value.role) {
+      return value;
+    }
+
+    return null;
+  };
+
+  useEffect(() => {
+    // On mount, if there's a token try to verify it and fetch user
+    let mounted = true;
+    const init = async () => {
+      const storedToken = localStorage.getItem('authToken');
+      const storedUser = localStorage.getItem('user');
+
+      if (storedToken) {
+        setToken(storedToken);
+        if (storedUser) {
+          try {
+            setUser(JSON.parse(storedUser));
+          } catch (err) {
+            // ignore parse errors
+            localStorage.removeItem('user');
+          }
+        }
+
+        try {
+          const res = await authService.verifyToken();
+          const verifiedUser = normalizeUser(res);
+          if (verifiedUser && mounted) {
+            const u = verifiedUser;
+            localStorage.setItem('user', JSON.stringify(u));
+            setUser(u);
+          }
+        } catch (err) {
+          // Token invalid or network error - clear and redirect handled by api helper on 401
+          localStorage.removeItem('authToken');
+          localStorage.removeItem('user');
+          setUser(null);
+          setToken(null);
+        }
+      }
+
+      if (mounted) setLoading(false);
+    };
+
+    init();
+    return () => (mounted = false);
   }, []);
 
   const login = async (email, password) => {
     setLoading(true);
     try {
-      // TODO: Replace with actual API call
-      // const response = await fetch('http://localhost:5000/api/auth/login', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({ email, password })
-      // });
-      // const data = await response.json();
-      
-      // Mock login - remove when backend is ready
-      const mockUser = {
-        id: '1',
-        name: 'John Doe',
-        email: email,
-        role: 'admin',
-        avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=John'
-      };
-      const mockToken = 'mock_jwt_token_' + Date.now();
-      
-      localStorage.setItem('user', JSON.stringify(mockUser));
-      localStorage.setItem('authToken', mockToken);
-      
-      setUser(mockUser);
-      setToken(mockToken);
-      return { success: true, user: mockUser };
+      const res = await authService.login(email, password);
+
+      // Accept multiple possible response shapes from backend
+      const tokenFromRes = res && (res.token || res.accessToken || res.data?.token);
+      const userFromRes = normalizeUser(res) || res?.user || res?.data?.user || null;
+
+      if (tokenFromRes) {
+        localStorage.setItem('authToken', tokenFromRes);
+        setToken(tokenFromRes);
+      }
+
+      if (userFromRes) {
+        localStorage.setItem('user', JSON.stringify(userFromRes));
+        setUser(userFromRes);
+        return { success: true, user: userFromRes };
+      }
+
+      // If token returned but user not in payload, attempt to verify
+      if (tokenFromRes && !userFromRes) {
+        try {
+          const v = await authService.verifyToken();
+          const u = normalizeUser(v) || userFromRes || JSON.parse(localStorage.getItem('user') || 'null');
+          if (u) {
+            localStorage.setItem('user', JSON.stringify(u));
+            setUser(u);
+            return { success: true, user: u };
+          }
+        } catch (err) {
+          return { success: false, error: err.message || 'Verification failed' };
+        }
+      }
+
+      // If backend returned a full success object with user/token at top-level
+      if (res && res.success && (res.user || res.token)) {
+        const u = res.user || (res.data && res.data.user) || null;
+        const t = res.token || (res.data && res.data.token) || null;
+        if (t) {
+          localStorage.setItem('authToken', t);
+          setToken(t);
+        }
+        if (u) {
+          localStorage.setItem('user', JSON.stringify(u));
+          setUser(u);
+        }
+        return { success: true, user: u };
+      }
+
+      return { success: false, error: res && res.error ? res.error : 'Invalid credentials' };
     } catch (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || 'Login failed' };
     } finally {
       setLoading(false);
     }
@@ -60,57 +131,49 @@ export const AuthProvider = ({ children }) => {
         return { success: false, error: 'Passwords do not match' };
       }
 
-      // TODO: Replace with actual API call
-      // const response = await fetch('http://localhost:5000/api/auth/register', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({ name, email, password })
-      // });
-      // const data = await response.json();
+      const res = await authService.register(name, email, password);
 
-      // Mock registration - remove when backend is ready
-      const mockUser = {
-        id: '1',
-        name: name,
-        email: email,
-        role: 'user',
-        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${name}`
-      };
-      const mockToken = 'mock_jwt_token_' + Date.now();
-      
-      localStorage.setItem('user', JSON.stringify(mockUser));
-      localStorage.setItem('authToken', mockToken);
-      
-      setUser(mockUser);
-      setToken(mockToken);
-      return { success: true, user: mockUser };
+      const tokenFromRes = res && (res.token || res.accessToken || res.data?.token);
+      const userFromRes = normalizeUser(res) || res?.user || res?.data?.user || null;
+
+      if (tokenFromRes) {
+        localStorage.setItem('authToken', tokenFromRes);
+        setToken(tokenFromRes);
+      }
+
+      if (userFromRes) {
+        localStorage.setItem('user', JSON.stringify(userFromRes));
+        setUser(userFromRes);
+        return { success: true, user: userFromRes };
+      }
+
+      return { success: false, error: res && res.error ? res.error : 'Registration failed' };
     } catch (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || 'Registration failed' };
     } finally {
       setLoading(false);
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await authService.logout();
+    } catch (err) {
+      // ignore
+    }
     localStorage.removeItem('user');
     localStorage.removeItem('authToken');
     setUser(null);
     setToken(null);
+    // Redirect to login
+    window.location.assign('/login');
   };
 
   const isAuthenticated = !!token && !!user;
 
   return (
     <AuthContext.Provider
-      value={{
-        user,
-        token,
-        loading,
-        isAuthenticated,
-        login,
-        register,
-        logout,
-      }}
+      value={{ user, token, loading, isAuthenticated, login, register, logout }}
     >
       {children}
     </AuthContext.Provider>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { FiMail, FiLock, FiEye, FiEyeOff, FiLoader, FiAlertCircle } from 'react-icons/fi';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -10,17 +10,11 @@ export default function Login() {
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
-  const navigate = useNavigate();
 
   // Email validation regex
   const validateEmail = (email) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
-  };
-
-  // Password validation - minimum 8 characters with at least one uppercase, one lowercase, one number
-  const validatePassword = (pwd) => {
-    return pwd.length >= 8 && /[A-Z]/.test(pwd) && /[a-z]/.test(pwd) && /[0-9]/.test(pwd);
   };
 
   const handleEmailChange = (e) => {
@@ -54,8 +48,6 @@ export default function Login() {
     // Validate password
     if (!password) {
       newErrors.password = 'Password is required';
-    } else if (!validatePassword(password)) {
-      newErrors.password = 'Password must be at least 8 characters with uppercase, lowercase, and numbers';
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -69,7 +61,7 @@ export default function Login() {
     setLoading(false);
 
     if (result.success) {
-      navigate('/dashboard');
+      window.location.assign('/dashboard');
     } else {
       // If user doesn't exist, show helpful message
       setErrors({
@@ -164,7 +156,7 @@ export default function Login() {
               )}
               
               {/* Password Requirements Info */}
-              <div className="mt-2 p-2.5 bg-blue-50 border border-blue-200 rounded-lg">
+              {/* <div className="mt-2 p-2.5 bg-blue-50 border border-blue-200 rounded-lg">
                 <p className="text-blue-900 text-xs font-semibold mb-1">Password Requirements:</p>
                 <ul className="text-blue-800 text-xs space-y-0.5">
                   <li>✓ At least 8 characters</li>
@@ -172,7 +164,7 @@ export default function Login() {
                   <li>✓ One lowercase letter (a-z)</li>
                   <li>✓ One number (0-9)</li>
                 </ul>
-              </div>
+              </div> */}
             </div>
 
             {/* Remember Me */}

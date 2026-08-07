@@ -1,48 +1,19 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-
-const getAuthHeaders = () => {
-  const token = localStorage.getItem('authToken');
-  return token ? { Authorization: `Bearer ${token}` } : {};
-};
+import { api } from './api';
 
 export const fetchCustomers = async () => {
   try {
-    const res = await fetch(`${API_BASE_URL}/customers`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAuthHeaders(),
-      },
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Failed to fetch customers: ${res.status} ${res.statusText} ${text}`);
-    }
-
-    return await res.json();
+    return await api.get('/customers');
   } catch (error) {
-    throw new Error(`Failed to fetch customers: ${error.message}`);
+    throw new Error(error.message || 'Failed to fetch customers');
   }
 };
 
 export const createCustomer = async (payload) => {
   try {
-    const res = await fetch(`${API_BASE_URL}/customers`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAuthHeaders(),
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Failed to create customer: ${res.status} ${res.statusText} ${text}`);
-    }
-
-    return await res.json();
+    return await api.post('/customers', payload);
   } catch (error) {
-    throw new Error(`Failed to create customer: ${error.message}`);
+    throw new Error(error.message || 'Failed to create customer');
   }
 };
+
+export default { fetchCustomers, createCustomer };

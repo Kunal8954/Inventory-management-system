@@ -33,7 +33,7 @@ const StockInForm = ({ products, onSubmit, onCancel }) => {
         >
           <option value="">Select a product</option>
           {products.map((product) => (
-            <option key={product.id} value={product.productId}>
+            <option key={product.id} value={product.id}>
               {product.productName} ({product.sku})
             </option>
           ))}
@@ -151,7 +151,7 @@ const StockOutForm = ({ products, onSubmit, onCancel }) => {
         >
           <option value="">Select a product</option>
           {products.map((product) => (
-            <option key={product.id} value={product.productId}>
+            <option key={product.id} value={product.id}>
               {product.productName} ({product.sku}) - Available: {product.availableQuantity}
             </option>
           ))}

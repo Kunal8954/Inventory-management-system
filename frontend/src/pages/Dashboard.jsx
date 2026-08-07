@@ -1,84 +1,166 @@
-import { useState, useEffect } from 'react'
-import { FaBox, FaExclamationTriangle, FaDollarSign, FaShoppingCart, FaPlus, FaChartLine, FaClock } from 'react-icons/fa'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import {
+  FiAlertTriangle,
+  FiClock,
+  FiDollarSign,
+  FiPackage,
+  FiRefreshCw,
+  FiShoppingCart,
+} from 'react-icons/fi';
+import { Button, EmptyState, Skeleton } from '../components/common';
+import { useInventory } from '../hooks/useInventory';
+import { fetchOrders } from '../services/salesService';
+import {
+  formatCurrency,
+  formatDateTime,
+  getTransactionTypeColor,
+  getTransactionTypeLabel,
+} from '../utils/formatters';
 
 export default function Dashboard() {
-  const [stats, setStats] = useState(null)
+  const { inventory, stats, lowStockAlerts, transactions, loading, error, refetch } = useInventory();
+  const [orders, setOrders] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [ordersError, setOrdersError] = useState(null);
 
   useEffect(() => {
-    // Mock data - replace with real API call later
-    setStats({
-      totalProducts: 245,
-      lowStockItems: 12,
-      inventoryValue: '$125,430',
-      ordersThisMonth: 48,
-      topProducts: [
-        { name: 'Laptop Pro', sales: 250 },
-        { name: 'USB Cable', sales: 420 },
-        { name: 'Monitor 27"', sales: 180 },
-        { name: 'Keyboard RGB', sales: 320 },
-      ],
-      recentTransactions: [
-        { id: 1, type: 'Stock In', product: 'Laptop Pro', quantity: 50, time: '2 hours ago' },
-        { id: 2, type: 'Stock Out', product: 'USB Cable', quantity: 100, time: '4 hours ago' },
-        { id: 3, type: 'Stock In', product: 'Monitor 27"', quantity: 20, time: '1 day ago' },
-        { id: 4, type: 'Stock Out', product: 'Keyboard RGB', quantity: 75, time: '1 day ago' },
-      ],
-      alerts: [
-        { id: 1, product: 'Mouse Wireless', stock: 5, threshold: 20 },
-        { id: 2, product: 'HDMI Cable', stock: 8, threshold: 15 },
-        { id: 3, product: 'Power Bank', stock: 3, threshold: 10 },
-      ],
-    })
-  }, [])
+    let mounted = true;
 
-  if (!stats) {
-    return <div>Loading...</div>
+    const loadOrders = async () => {
+      setOrdersLoading(true);
+      setOrdersError(null);
+
+      try {
+        const data = await fetchOrders();
+        if (!mounted) return;
+        setOrders(Array.isArray(data) ? data : []);
+      } catch (err) {
+        if (!mounted) return;
+        setOrdersError(err.message || 'Failed to load orders');
+      } finally {
+        if (mounted) {
+          setOrdersLoading(false);
+        }
+      }
+    };
+
+    loadOrders();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const isLoading = loading || ordersLoading;
+  const combinedError = error || ordersError;
+
+  const reloadAll = () => {
+    refetch();
+    setOrdersLoading(true);
+    setOrdersError(null);
+    fetchOrders()
+      .then((data) => setOrders(Array.isArray(data) ? data : []))
+      .catch((err) => setOrdersError(err.message || 'Failed to load orders'))
+      .finally(() => setOrdersLoading(false));
+  };
+
+  const totalProducts = stats?.totalItems ?? inventory.length;
+  const lowStockCount = lowStockAlerts.length;
+  const inventoryValue = formatCurrency(stats?.totalValue ?? 0);
+  const ordersThisMonth = orders.filter((order) => {
+    const orderDate = order.order_date || order.created_at || order.createdAt;
+    if (!orderDate) return true;
+    const date = new Date(orderDate);
+    const now = new Date();
+    return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+  }).length;
+
+  const topStockedProducts = useMemo(
+    () =>
+      [...inventory]
+        .sort((left, right) => (right.quantity || 0) - (left.quantity || 0))
+        .slice(0, 4),
+    [inventory]
+  );
+
+  const recentTransactions = useMemo(() => transactions.slice(0, 5), [transactions]);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-4xl font-bold text-slate-900 mb-2">Dashboard</h1>
+          <p className="text-slate-600">Loading inventory overview...</p>
+        </div>
+        <Skeleton count={4} height="h-24" />
+        <Skeleton count={2} height="h-64" />
+      </div>
+    );
+  }
+
+  if (combinedError) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-4xl font-bold text-slate-900 mb-2">Dashboard</h1>
+          <p className="text-slate-600">We couldn't load inventory data right now.</p>
+        </div>
+        <EmptyState
+          title="Dashboard unavailable"
+          description={combinedError}
+          action={
+            <Button variant="primary" onClick={reloadAll}>
+              Retry
+            </Button>
+          }
+        />
+      </div>
+    );
   }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-4xl font-bold text-slate-900 mb-2">Dashboard</h1>
-          <p className="text-slate-600">Welcome back! Here's your inventory overview.</p>
+          <p className="text-slate-600">Welcome back. Here's your live inventory overview.</p>
         </div>
-        <div className="flex gap-2 mt-4 md:mt-0">
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={reloadAll} className="flex items-center gap-2">
+            <FiRefreshCw size={16} /> Refresh
+          </Button>
           <Link
             to="/inventory"
             className="flex items-center gap-2 px-4 py-2.5 bg-accent-600 text-white rounded-lg hover:bg-accent-700 transition font-medium"
           >
-            <FaPlus size={16} /> Add Stock
+            <FiPackage size={16} /> Add Stock
           </Link>
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Products */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl shadow-soft-md p-6 border border-slate-200">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-slate-600 mb-1">Total Products</p>
-              <p className="text-3xl font-bold text-slate-900">{stats.totalProducts}</p>
+              <p className="text-3xl font-bold text-slate-900">{totalProducts}</p>
             </div>
             <div className="w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center">
-              <FaBox className="text-blue-600 text-xl" />
+              <FiPackage className="text-blue-600 text-xl" />
             </div>
           </div>
-          <p className="text-xs text-slate-500 mt-3">+5 added this month</p>
+          <p className="text-xs text-slate-500 mt-3">Tracked items in inventory</p>
         </div>
 
-        {/* Low Stock Items */}
         <div className="bg-white rounded-xl shadow-soft-md p-6 border border-slate-200">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-slate-600 mb-1">Low Stock Items</p>
-              <p className="text-3xl font-bold text-red-600">{stats.lowStockItems}</p>
+              <p className="text-3xl font-bold text-amber-600">{lowStockCount}</p>
             </div>
-            <div className="w-12 h-12 rounded-lg bg-red-100 flex items-center justify-center">
-              <FaExclamationTriangle className="text-red-600 text-xl" />
+            <div className="w-12 h-12 rounded-lg bg-amber-100 flex items-center justify-center">
+              <FiAlertTriangle className="text-amber-600 text-xl" />
             </div>
           </div>
           <Link to="/alerts" className="text-xs text-accent-600 hover:text-accent-700 mt-3 inline-block font-medium">
@@ -86,88 +168,97 @@ export default function Dashboard() {
           </Link>
         </div>
 
-        {/* Inventory Value */}
-        <div className="bg-white rounded-xl shadow-soft-md p-6 border border-slate-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-slate-600 mb-1">Inventory Value</p>
-              <p className="text-3xl font-bold text-slate-900">{stats.inventoryValue}</p>
-            </div>
-            <div className="w-12 h-12 rounded-lg bg-green-100 flex items-center justify-center">
-              <FaDollarSign className="text-green-600 text-xl" />
-            </div>
-          </div>
-          <p className="text-xs text-slate-500 mt-3">+2.5% vs last month</p>
-        </div>
-
-        {/* Orders This Month */}
         <div className="bg-white rounded-xl shadow-soft-md p-6 border border-slate-200">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-slate-600 mb-1">Orders This Month</p>
-              <p className="text-3xl font-bold text-slate-900">{stats.ordersThisMonth}</p>
+              <p className="text-3xl font-bold text-slate-900">{ordersThisMonth}</p>
             </div>
             <div className="w-12 h-12 rounded-lg bg-purple-100 flex items-center justify-center">
-              <FaShoppingCart className="text-purple-600 text-xl" />
+              <FiShoppingCart className="text-purple-600 text-xl" />
             </div>
           </div>
-          <p className="text-xs text-slate-500 mt-3">+8 pending</p>
+          <p className="text-xs text-slate-500 mt-3">Pulled from the live orders endpoint</p>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-soft-md p-6 border border-slate-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-slate-600 mb-1">Inventory Value</p>
+              <p className="text-3xl font-bold text-slate-900">{inventoryValue}</p>
+            </div>
+            <div className="w-12 h-12 rounded-lg bg-green-100 flex items-center justify-center">
+              <FiDollarSign className="text-green-600 text-xl" />
+            </div>
+          </div>
+          <p className="text-xs text-slate-500 mt-3">Computed from current stock and pricing</p>
         </div>
       </div>
 
-      {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Top Products */}
         <div className="lg:col-span-2 bg-white rounded-xl shadow-soft-md p-6 border border-slate-200">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-slate-900">Top Selling Products</h2>
-            <FaChartLine className="text-accent-600" />
+            <h2 className="text-lg font-bold text-slate-900">Top Stocked Products</h2>
+            <FiPackage className="text-accent-600" />
           </div>
           <div className="space-y-3">
-            {stats.topProducts.map((product, idx) => (
-              <div key={idx} className="flex items-center justify-between">
-                <div className="flex items-center gap-3 flex-1">
-                  <div className="w-8 h-8 rounded-lg bg-accent-100 flex items-center justify-center text-sm font-semibold text-accent-600">
-                    {idx + 1}
+            {topStockedProducts.length > 0 ? (
+              topStockedProducts.map((product, index) => (
+                <div key={product.id || product.productId || product.sku || index} className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className="w-8 h-8 rounded-lg bg-accent-100 flex items-center justify-center text-sm font-semibold text-accent-600">
+                      {index + 1}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-medium text-slate-900 truncate">{product.productName || product.name}</p>
+                      <p className="text-xs text-slate-500">{product.sku}</p>
+                    </div>
                   </div>
-                  <p className="font-medium text-slate-900">{product.name}</p>
+                  <span className="text-sm font-semibold text-slate-600">{product.quantity}</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-24 h-2 bg-slate-200 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-accent-600 rounded-full" 
-                      style={{ width: `${(product.sales / 450) * 100}%` }}
-                    />
-                  </div>
-                  <span className="text-sm font-semibold text-slate-600 w-10 text-right">{product.sales}</span>
-                </div>
-              </div>
-            ))}
+              ))
+            ) : (
+              <EmptyState
+                title="No inventory data yet"
+                description="Products will appear here once stock is available."
+              />
+            )}
           </div>
         </div>
 
-        {/* Low Stock Alerts */}
         <div className="bg-white rounded-xl shadow-soft-md p-6 border border-slate-200">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-slate-900">Low Stock Alerts</h2>
             <span className="text-xs font-semibold bg-red-100 text-red-700 px-2 py-1 rounded-full">
-              {stats.alerts.length}
+              {lowStockAlerts.length}
             </span>
           </div>
           <div className="space-y-3">
-            {stats.alerts.map((alert) => (
-              <div key={alert.id} className="p-3 rounded-lg bg-red-50 border border-red-200">
-                <p className="font-medium text-slate-900 text-sm">{alert.product}</p>
-                <p className="text-xs text-red-600 mt-1">
-                  Stock: <span className="font-semibold">{alert.stock}</span> / Threshold: <span className="font-semibold">{alert.threshold}</span>
-                </p>
-              </div>
-            ))}
+            {lowStockAlerts.length > 0 ? (
+              lowStockAlerts.slice(0, 5).map((alert) => (
+                <div key={alert.id} className="p-3 rounded-lg bg-red-50 border border-red-200">
+                  <p className="font-medium text-slate-900 text-sm">{alert.productName || alert.name}</p>
+                  <p className="text-xs text-red-600 mt-1">
+                    Stock: <span className="font-semibold">{alert.quantity ?? 0}</span>
+                    {typeof alert.shortage === 'number' ? (
+                      <>
+                        {' '}
+                        / Shortage: <span className="font-semibold">{alert.shortage}</span>
+                      </>
+                    ) : null}
+                  </p>
+                </div>
+              ))
+            ) : (
+              <EmptyState
+                title="No low stock alerts"
+                description="Everything is above the reorder threshold right now."
+              />
+            )}
           </div>
         </div>
       </div>
 
-      {/* Recent Transactions */}
       <div className="bg-white rounded-xl shadow-soft-md p-6 border border-slate-200">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-slate-900">Recent Transactions</h2>
@@ -175,39 +266,42 @@ export default function Dashboard() {
             View all →
           </Link>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-slate-200">
-                <th className="text-left py-3 px-4 text-xs font-semibold text-slate-600">Type</th>
-                <th className="text-left py-3 px-4 text-xs font-semibold text-slate-600">Product</th>
-                <th className="text-left py-3 px-4 text-xs font-semibold text-slate-600">Quantity</th>
-                <th className="text-left py-3 px-4 text-xs font-semibold text-slate-600">Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stats.recentTransactions.map((txn) => (
-                <tr key={txn.id} className="border-b border-slate-200 hover:bg-slate-50 transition">
-                  <td className="py-3 px-4">
-                    <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
-                      txn.type === 'Stock In' 
-                        ? 'bg-green-100 text-green-700' 
-                        : 'bg-blue-100 text-blue-700'
-                    }`}>
-                      {txn.type}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 text-sm text-slate-900 font-medium">{txn.product}</td>
-                  <td className="py-3 px-4 text-sm text-slate-600">{txn.quantity}</td>
-                  <td className="py-3 px-4 text-sm text-slate-500 flex items-center gap-1">
-                    <FaClock size={12} /> {txn.time}
-                  </td>
+        {recentTransactions.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-200">
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-slate-600">Type</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-slate-600">Product</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-slate-600">Quantity</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-slate-600">Time</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {recentTransactions.map((txn) => (
+                  <tr key={txn.id} className="border-b border-slate-200 hover:bg-slate-50 transition">
+                    <td className="py-3 px-4">
+                      <span className={`text-xs font-semibold px-2 py-1 rounded-full ${getTransactionTypeColor(txn.type)}`}>
+                        {getTransactionTypeLabel(txn.type)}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-sm text-slate-900 font-medium">{txn.productName}</td>
+                    <td className="py-3 px-4 text-sm text-slate-600">{txn.quantity}</td>
+                    <td className="py-3 px-4 text-sm text-slate-500 flex items-center gap-1">
+                      <FiClock size={12} /> {formatDateTime(txn.date, txn.time)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState
+            title="No recent transactions"
+            description="Stock in and stock out activity will appear here once inventory changes are recorded."
+          />
+        )}
       </div>
     </div>
-  )
+  );
 }

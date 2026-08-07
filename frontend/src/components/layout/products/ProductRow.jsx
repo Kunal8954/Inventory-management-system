@@ -5,6 +5,8 @@ import {
 } from "react-icons/fi";
 
 const ProductRow = ({ product }) => {
+  const displayName = product.name || product.productName || 'Product';
+  const displayInitial = displayName.trim().charAt(0).toUpperCase() || 'P';
   const statusClasses = {
     "In Stock":
       "bg-green-100 text-green-700",
@@ -12,22 +14,29 @@ const ProductRow = ({ product }) => {
       "bg-yellow-100 text-yellow-700",
     "Out of Stock":
       "bg-red-100 text-red-700",
+    default: "bg-slate-100 text-slate-700",
   };
 
   return (
     <tr className="border-b last:border-b-0 hover:bg-gray-50 transition">
       {/* Image */}
       <td className="px-6 py-4">
-        <img
-          src={product.image}
-          alt={product.name}
-          className="h-12 w-12 rounded-lg object-cover border"
-        />
+        {product.image ? (
+          <img
+            src={product.image}
+            alt={displayName}
+            className="h-12 w-12 rounded-lg object-cover border"
+          />
+        ) : (
+          <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-slate-200 bg-slate-100 text-sm font-semibold text-slate-600">
+            {displayInitial}
+          </div>
+        )}
       </td>
 
       {/* Name */}
       <td className="px-6 py-4 font-medium text-gray-800 whitespace-nowrap">
-        {product.name}
+        {displayName}
       </td>
 
       {/* SKU */}
@@ -47,7 +56,7 @@ const ProductRow = ({ product }) => {
 
       {/* Price */}
       <td className="px-6 py-4 whitespace-nowrap font-medium">
-        ₹{product.price.toLocaleString()}
+        ₹{Number(product.price || 0).toLocaleString('en-IN')}
       </td>
 
       {/* Stock */}
@@ -58,7 +67,7 @@ const ProductRow = ({ product }) => {
       {/* Status */}
       <td className="px-6 py-4 whitespace-nowrap">
         <span
-          className={`px-3 py-1 rounded-full text-xs font-semibold ${statusClasses[product.status]}`}
+          className={`px-3 py-1 rounded-full text-xs font-semibold ${statusClasses[product.status] || statusClasses.default}`}
         >
           {product.status}
         </span>

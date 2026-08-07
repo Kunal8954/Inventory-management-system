@@ -1,4 +1,10 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import {
+  fetchInventory,
+  fetchInventoryStats,
+  fetchLowStockAlerts,
+  fetchTransactions,
+} from '../services/inventoryService';
 
 // Hook for managing notifications/toasts
 export const useNotification = () => {
@@ -178,5 +184,71 @@ export const useFilters = (initialFilters = {}) => {
     updateFilter,
     clearFilter,
     clearAllFilters,
+  };
+};
+
+export const useInventory = () => {
+  const [inventory, setInventory] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [lowStockAlerts, setLowStockAlerts] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const mountedRef = useRef(true);
+
+  const loadInventory = useCallback(async () => {
+    if (!mountedRef.current) {
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const [inventoryData, statsData, lowStockData, transactionData] = await Promise.all([
+        fetchInventory(),
+        fetchInventoryStats(),
+        fetchLowStockAlerts(),
+        fetchTransactions(),
+      ]);
+
+      if (!mountedRef.current) {
+        return;
+      }
+
+      setInventory(Array.isArray(inventoryData) ? inventoryData : []);
+      setStats(statsData || null);
+      setLowStockAlerts(Array.isArray(lowStockData) ? lowStockData : []);
+      setTransactions(Array.isArray(transactionData) ? transactionData : []);
+    } catch (err) {
+      if (!mountedRef.current) {
+        return;
+      }
+
+      setError(err.message || 'Failed to load inventory');
+    } finally {
+      if (mountedRef.current) {
+        setLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    loadInventory();
+
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [loadInventory]);
+
+  return {
+    inventory,
+    stats,
+    lowStockAlerts,
+    transactions,
+    loading,
+    error,
+    refetch: loadInventory,
   };
 };
