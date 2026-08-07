@@ -8,4 +8,12 @@ export const fetchOrders = async () => {
   }
 };
 
-export default { fetchOrders };
+export const createOrder = async (payload) => {
+  try {
+    return await api.post('/orders', payload);
+  } catch (error) {
+    throw new Error(error.message || 'Failed to create order');
+  }
+};
+
+export default { fetchOrders, createOrder };

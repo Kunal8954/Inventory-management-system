@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react"
+import { useLocation } from "react-router-dom";
 import { FiPlus } from "react-icons/fi";
 
 import { EmptyState, Skeleton, Button, Notification } from "../components/common";
@@ -22,6 +23,12 @@ export default function Products() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
+  const location = useLocation();
+  useEffect(() => {
+    if (location.state?.presetSearch) {
+      setSearch(location.state.presetSearch);
+    }
+  }, [location.state]);
   const [category, setCategory] = useState("All");
   const [status, setStatus] = useState("All");
   const [currentPage, setCurrentPage] = useState(1);

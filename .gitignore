@@ -4,3 +4,5 @@ backend/cookies.txt
 __pycache__/
 *.pyc
 backend/app.py.backup
+.DS_Store
+**/.DS_Store

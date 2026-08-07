@@ -1,6 +1,5 @@
 import { api } from './api';
 
-// Real auth service used by AuthContext
 export const authService = {
 	async login(email, password) {
 		try {
@@ -11,12 +10,30 @@ export const authService = {
 		}
 	},
 
-	async register(name, email, password) {
+	async register(name, email, password, role) {
 		try {
-			const data = await api.post('/auth/register', { name, email, password }, { auth: false });
+			const data = await api.post('/auth/register', { name, email, password, role }, { auth: false });
 			return data;
 		} catch (error) {
 			return { success: false, error: error.message || 'Registration failed' };
+		}
+	},
+
+	async verifyOtp(email, otp) {
+		try {
+			const data = await api.post('/auth/verify-otp', { email, otp }, { auth: false });
+			return data;
+		} catch (error) {
+			return { success: false, error: error.message || 'Verification failed' };
+		}
+	},
+
+	async resendOtp(email) {
+		try {
+			const data = await api.post('/auth/resend-otp', { email }, { auth: false });
+			return data;
+		} catch (error) {
+			return { success: false, error: error.message || 'Failed to resend OTP' };
 		}
 	},
 
@@ -31,8 +48,6 @@ export const authService = {
 
 	async logout() {
 		try {
-			// Optionally call backend logout endpoint
-			// await api.post('/auth/logout');
 			localStorage.removeItem('authToken');
 			localStorage.removeItem('user');
 			return { success: true };

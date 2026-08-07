@@ -1,9 +1,12 @@
 import { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { FiLogOut } from 'react-icons/fi';
 import { Button, Badge } from '../components/common';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Settings() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
 
   const accountRows = useMemo(
     () => [
@@ -40,6 +43,11 @@ export default function Settings() {
     ],
     [user]
   );
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login');
+  };
 
   return (
     <div className="space-y-6">
@@ -89,6 +97,24 @@ export default function Settings() {
             <div className="mt-4">
               <Button variant="outline" disabled>
                 Disabled until backend support
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Sign out</p>
+                <p className="text-sm text-slate-500">End your current session on this device.</p>
+              </div>
+            </div>
+            <div className="mt-4">
+              <Button
+                variant="danger"
+                onClick={handleLogout}
+                className="flex items-center gap-2"
+              >
+                <FiLogOut size={16} /> Logout
               </Button>
             </div>
           </div>

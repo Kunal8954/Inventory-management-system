@@ -83,7 +83,8 @@ export const navGroups = [
       },
     ],
   },
-  {
+  
+    {
     id: "sales",
     label: "Sales",
     icon: FaChartLine,
@@ -93,8 +94,14 @@ export const navGroups = [
         path: "/sales",
         icon: FaChartLine,
       },
+      {
+        label: "Customers",
+        path: "/customers",
+        icon: FaUsers,
+      },
     ],
   },
+  
   {
     id: "reports",
     label: "Reports",

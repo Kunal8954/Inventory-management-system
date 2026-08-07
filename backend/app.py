@@ -3,6 +3,10 @@ from flask_cors import CORS
 from functools import wraps
 import bcrypt
 import os
+import random
+import smtplib
+from email.mime.text import MIMEText
+from datetime import datetime
 from dotenv import load_dotenv
 from db_utils import get_connection, execute_transaction
 from flask_limiter import Limiter
@@ -34,6 +38,27 @@ def get_user_id_from_bearer_token():
         return payload.get('user_id')
     except Exception:
         return None
+
+# ----------------------
+# Email helper (Gmail SMTP, used for OTP verification)
+# ----------------------
+def send_otp_email(to_email, otp_code):
+    gmail_user = os.getenv("GMAIL_USER")
+    gmail_password = os.getenv("GMAIL_APP_PASSWORD")
+
+    msg = MIMEText(
+        f"Your StockPilot verification code is: {otp_code}\n\n"
+        f"This code expires in 10 minutes.\n\n"
+        f"If you did not request this, you can safely ignore this email."
+    )
+    msg['Subject'] = 'StockPilot - Verify your email'
+    msg['From'] = gmail_user
+    msg['To'] = to_email
+
+    with smtplib.SMTP('smtp.gmail.com', 587) as server:
+        server.starttls()
+        server.login(gmail_user, gmail_password)
+        server.send_message(msg)
 
 # ---------- Helper: permission-check decorator (Bearer-token based) ----------
 def require_permission(permission_name):
@@ -190,7 +215,6 @@ def create_supplier():
         return jsonify({"message": "Supplier created"}), 201
     return jsonify({"error": result['error']}), 400
 
-# ---------- CUSTOMERS ----------
 # ---------- PURCHASE ORDERS ----------
 @app.route('/api/purchase-orders', methods=['GET'])
 @require_permission('orders.view')
@@ -243,6 +267,7 @@ def create_purchase_order():
         cur.close()
         conn.close()
 
+# ---------- CUSTOMERS ----------
 @app.route('/api/customers', methods=['GET'])
 def get_customers():
     conn = get_connection()
@@ -296,7 +321,7 @@ def create_order():
 
         cur.execute(
             "INSERT INTO orders (customer_id, user_id, total_amount, order_status) VALUES (%s,%s,%s,%s)",
-            (data['customer_id'], user_id, data['total_amount'], data.get('order_status', 'Pending'))
+            (data['customer_id'], user_id, data['total_amount'], data.get('order_status', 'Completed'))
         )
         order_id = cur.lastrowid
 
@@ -306,6 +331,20 @@ def create_order():
                    VALUES (%s,%s,%s,%s,%s)""",
                 (order_id, item['product_id'], item['quantity'], item['unit_price'],
                  item['quantity'] * item['unit_price'])
+            )
+
+            cur.execute(
+                "UPDATE products SET stock_quantity = stock_quantity - %s WHERE product_id = %s AND stock_quantity >= %s",
+                (item['quantity'], item['product_id'], item['quantity'])
+            )
+            if cur.rowcount == 0:
+                conn.rollback()
+                return jsonify({"error": f"Insufficient stock for product {item['product_id']}"}), 400
+
+            cur.execute(
+                """INSERT INTO inventory_transactions (product_id, user_id, transaction_type, quantity, remarks)
+                   VALUES (%s,%s,'Stock Out',%s,%s)""",
+                (item['product_id'], user_id, item['quantity'], f"Sale - Order #{order_id}")
             )
 
         conn.commit()
@@ -439,6 +478,14 @@ def api_auth_login():
     if not password_ok:
         return jsonify({"success": False, "error": "Invalid credentials"}), 401
 
+    if not user.get('is_verified'):
+        return jsonify({
+            "success": False,
+            "error": "Email not verified. Please check your inbox for the OTP.",
+            "needsVerification": True,
+            "email": email
+        }), 403
+
     user_id = user.get('user_id')
     token = serializer.dumps({"user_id": user_id})
     user_obj = {
@@ -456,6 +503,9 @@ def api_auth_register():
     name = data.get('name','').strip()
     email = data.get('email','').strip()
     password = data.get('password','')
+    role_name = data.get('role', 'Staff')
+    if role_name not in ('Admin', 'Manager', 'Staff'):
+        role_name = 'Staff'
 
     if not name or not email or not password:
         return jsonify({"success": False, "error": "Missing fields"}), 400
@@ -482,18 +532,20 @@ def api_auth_register():
         suffix += 1
         username = f"{base_username}{suffix}"
 
-    cur.execute("SELECT role_id FROM roles WHERE role_name = %s LIMIT 1", ("Staff",))
+    cur.execute("SELECT role_id FROM roles WHERE role_name = %s LIMIT 1", (role_name,))
     row = cur.fetchone()
     role_id = row[0] if row else None
 
     pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    otp_code = f"{random.randint(0, 999999):06d}"
 
     try:
         cur.execute(
-            "INSERT INTO users (first_name, last_name, username, email, password_hash, role, role_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-            (first_name, last_name, username, email, pw_hash, 'Staff', role_id)
+            """INSERT INTO users
+               (first_name, last_name, username, email, password_hash, role, role_id, is_verified, otp_code, otp_expires_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,0,%s, DATE_ADD(NOW(), INTERVAL 10 MINUTE))""",
+            (first_name, last_name, username, email, pw_hash, role_name, role_id, otp_code)
         )
-        new_id = cur.lastrowid
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -504,14 +556,104 @@ def api_auth_register():
     cur.close()
     conn.close()
 
-    token = serializer.dumps({"user_id": new_id})
+    try:
+        send_otp_email(email, otp_code)
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Account created but failed to send OTP email: {str(e)}"}), 500
+
+    return jsonify({"success": True, "message": "OTP sent to your email", "email": email}), 201
+
+
+@app.route('/api/auth/verify-otp', methods=['POST'])
+@limiter.limit("10 per minute")
+def api_auth_verify_otp():
+    data = request.json or {}
+    email = data.get('email', '').strip()
+    otp = data.get('otp', '').strip()
+
+    if not email or not otp:
+        return jsonify({"success": False, "error": "Email and OTP required"}), 400
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+    user = cur.fetchone()
+
+    if not user:
+        cur.close()
+        conn.close()
+        return jsonify({"success": False, "error": "User not found"}), 404
+
+    if user.get('is_verified'):
+        cur.close()
+        conn.close()
+        return jsonify({"success": False, "error": "Already verified"}), 400
+
+    if not user.get('otp_code') or user.get('otp_code') != otp:
+        cur.close()
+        conn.close()
+        return jsonify({"success": False, "error": "Invalid OTP"}), 400
+
+    expires_at = user.get('otp_expires_at')
+    if not expires_at or datetime.now() > expires_at:
+        cur.close()
+        conn.close()
+        return jsonify({"success": False, "error": "OTP expired, please request a new one"}), 400
+
+    cur.execute("UPDATE users SET is_verified = 1, otp_code = NULL, otp_expires_at = NULL WHERE email = %s", (email,))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    user_id = user.get('user_id')
+    token = serializer.dumps({"user_id": user_id})
     user_obj = {
-        "id": str(new_id),
-        "name": f"{first_name} {last_name}".strip(),
-        "email": email,
-        "role": "staff"
+        "id": str(user_id),
+        "name": f"{user.get('first_name','').strip()} {user.get('last_name','').strip()}".strip(),
+        "email": user.get('email'),
+        "role": (user.get('role') or '').lower()
     }
-    return jsonify({"success": True, "user": user_obj, "token": token}), 201
+    return jsonify({"success": True, "user": user_obj, "token": token})
+
+
+@app.route('/api/auth/resend-otp', methods=['POST'])
+@limiter.limit("3 per minute")
+def api_auth_resend_otp():
+    data = request.json or {}
+    email = data.get('email', '').strip()
+    if not email:
+        return jsonify({"success": False, "error": "Email required"}), 400
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+    user = cur.fetchone()
+
+    if not user:
+        cur.close()
+        conn.close()
+        return jsonify({"success": False, "error": "User not found"}), 404
+
+    if user.get('is_verified'):
+        cur.close()
+        conn.close()
+        return jsonify({"success": False, "error": "Already verified"}), 400
+
+    otp_code = f"{random.randint(0, 999999):06d}"
+    cur.execute(
+        "UPDATE users SET otp_code = %s, otp_expires_at = DATE_ADD(NOW(), INTERVAL 10 MINUTE) WHERE email = %s",
+        (otp_code, email)
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    try:
+        send_otp_email(email, otp_code)
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Failed to send OTP: {str(e)}"}), 500
+
+    return jsonify({"success": True, "message": "OTP resent"})
 
 
 @app.route('/api/auth/verify', methods=['GET'])

@@ -25,7 +25,6 @@ export const AuthProvider = ({ children }) => {
   };
 
   useEffect(() => {
-    // On mount, if there's a token try to verify it and fetch user
     let mounted = true;
     const init = async () => {
       const storedToken = localStorage.getItem('authToken');
@@ -37,7 +36,6 @@ export const AuthProvider = ({ children }) => {
           try {
             setUser(JSON.parse(storedUser));
           } catch (err) {
-            // ignore parse errors
             localStorage.removeItem('user');
           }
         }
@@ -51,7 +49,6 @@ export const AuthProvider = ({ children }) => {
             setUser(u);
           }
         } catch (err) {
-          // Token invalid or network error - clear and redirect handled by api helper on 401
           localStorage.removeItem('authToken');
           localStorage.removeItem('user');
           setUser(null);
@@ -66,53 +63,38 @@ export const AuthProvider = ({ children }) => {
     return () => (mounted = false);
   }, []);
 
+  const applySession = (res) => {
+    const tokenFromRes = res && (res.token || res.accessToken || res.data?.token);
+    const userFromRes = normalizeUser(res) || res?.user || res?.data?.user || null;
+
+    if (tokenFromRes) {
+      localStorage.setItem('authToken', tokenFromRes);
+      setToken(tokenFromRes);
+    }
+    if (userFromRes) {
+      localStorage.setItem('user', JSON.stringify(userFromRes));
+      setUser(userFromRes);
+    }
+    return userFromRes;
+  };
+
   const login = async (email, password) => {
     setLoading(true);
     try {
       const res = await authService.login(email, password);
 
-      // Accept multiple possible response shapes from backend
-      const tokenFromRes = res && (res.token || res.accessToken || res.data?.token);
-      const userFromRes = normalizeUser(res) || res?.user || res?.data?.user || null;
-
-      if (tokenFromRes) {
-        localStorage.setItem('authToken', tokenFromRes);
-        setToken(tokenFromRes);
+      if (res && res.needsVerification) {
+        return { success: false, needsVerification: true, email: res.email || email, error: res.error };
       }
 
+      const userFromRes = applySession(res);
+
       if (userFromRes) {
-        localStorage.setItem('user', JSON.stringify(userFromRes));
-        setUser(userFromRes);
         return { success: true, user: userFromRes };
       }
 
-      // If token returned but user not in payload, attempt to verify
-      if (tokenFromRes && !userFromRes) {
-        try {
-          const v = await authService.verifyToken();
-          const u = normalizeUser(v) || userFromRes || JSON.parse(localStorage.getItem('user') || 'null');
-          if (u) {
-            localStorage.setItem('user', JSON.stringify(u));
-            setUser(u);
-            return { success: true, user: u };
-          }
-        } catch (err) {
-          return { success: false, error: err.message || 'Verification failed' };
-        }
-      }
-
-      // If backend returned a full success object with user/token at top-level
       if (res && res.success && (res.user || res.token)) {
         const u = res.user || (res.data && res.data.user) || null;
-        const t = res.token || (res.data && res.data.token) || null;
-        if (t) {
-          localStorage.setItem('authToken', t);
-          setToken(t);
-        }
-        if (u) {
-          localStorage.setItem('user', JSON.stringify(u));
-          setUser(u);
-        }
         return { success: true, user: u };
       }
 
@@ -124,27 +106,19 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const register = async (name, email, password, confirmPassword) => {
+  // register: does NOT log the user in anymore. Backend sends an OTP email
+  // and the caller (Register page) is responsible for showing the OTP step.
+  const register = async (name, email, password, confirmPassword, role) => {
     setLoading(true);
     try {
       if (password !== confirmPassword) {
         return { success: false, error: 'Passwords do not match' };
       }
 
-      const res = await authService.register(name, email, password);
+      const res = await authService.register(name, email, password, role);
 
-      const tokenFromRes = res && (res.token || res.accessToken || res.data?.token);
-      const userFromRes = normalizeUser(res) || res?.user || res?.data?.user || null;
-
-      if (tokenFromRes) {
-        localStorage.setItem('authToken', tokenFromRes);
-        setToken(tokenFromRes);
-      }
-
-      if (userFromRes) {
-        localStorage.setItem('user', JSON.stringify(userFromRes));
-        setUser(userFromRes);
-        return { success: true, user: userFromRes };
+      if (res && res.success) {
+        return { success: true, needsVerification: true, email: res.email || email };
       }
 
       return { success: false, error: res && res.error ? res.error : 'Registration failed' };
@@ -152,6 +126,35 @@ export const AuthProvider = ({ children }) => {
       return { success: false, error: error.message || 'Registration failed' };
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Called after the user enters the OTP they received by email.
+  // On success, this logs them in (same effect as login()).
+  const verifyOtp = async (email, otp) => {
+    setLoading(true);
+    try {
+      const res = await authService.verifyOtp(email, otp);
+      const userFromRes = applySession(res);
+
+      if (userFromRes) {
+        return { success: true, user: userFromRes };
+      }
+
+      return { success: false, error: res && res.error ? res.error : 'Verification failed' };
+    } catch (error) {
+      return { success: false, error: error.message || 'Verification failed' };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resendOtp = async (email) => {
+    try {
+      const res = await authService.resendOtp(email);
+      return res;
+    } catch (error) {
+      return { success: false, error: error.message || 'Failed to resend OTP' };
     }
   };
 
@@ -165,7 +168,6 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('authToken');
     setUser(null);
     setToken(null);
-    // Redirect to login
     window.location.assign('/login');
   };
 
@@ -173,7 +175,7 @@ export const AuthProvider = ({ children }) => {
 
   return (
     <AuthContext.Provider
-      value={{ user, token, loading, isAuthenticated, login, register, logout }}
+      value={{ user, token, loading, isAuthenticated, login, register, verifyOtp, resendOtp, logout }}
     >
       {children}
     </AuthContext.Provider>
