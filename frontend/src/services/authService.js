@@ -37,6 +37,24 @@ export const authService = {
 		}
 	},
 
+	async forgotPassword(email) {
+		try {
+			const data = await api.post('/auth/forgot-password', { email }, { auth: false });
+			return data;
+		} catch (error) {
+			return { success: false, error: error.message || 'Failed to send reset code' };
+		}
+	},
+
+	async resetPassword(email, otp, newPassword) {
+		try {
+			const data = await api.post('/auth/reset-password', { email, otp, new_password: newPassword }, { auth: false });
+			return data;
+		} catch (error) {
+			return { success: false, error: error.message || 'Failed to reset password' };
+		}
+	},
+
 	async verifyToken() {
 		try {
 			const data = await api.get('/auth/verify');

@@ -19,6 +19,7 @@ import Reports from "./pages/Reports";
 import InventoryHistory from "./pages/InventoryHistory";
 import Notifications from "./pages/Notifications";
 import Settings from "./pages/Settings";
+import ForgotPassword from './pages/ForgotPassword';
 
 function App() {
   return (
@@ -28,7 +29,7 @@ function App() {
           {/* Public Routes */}
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-
+          <Route path="/forgot-password" element={<ForgotPassword />} />
           {/* Protected Routes */}
           <Route
             element={

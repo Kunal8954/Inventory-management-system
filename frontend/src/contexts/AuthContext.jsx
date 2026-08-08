@@ -158,6 +158,27 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // Step 1 of password reset: request an OTP be sent to the given email.
+  const forgotPassword = async (email) => {
+    try {
+      const res = await authService.forgotPassword(email);
+      return res;
+    } catch (error) {
+      return { success: false, error: error.message || 'Failed to send reset code' };
+    }
+  };
+
+  // Step 2 of password reset: submit the OTP + new password. Does NOT log the user in —
+  // they go back to the login page and sign in with the new password.
+  const resetPassword = async (email, otp, newPassword) => {
+    try {
+      const res = await authService.resetPassword(email, otp, newPassword);
+      return res;
+    } catch (error) {
+      return { success: false, error: error.message || 'Failed to reset password' };
+    }
+  };
+
   const logout = async () => {
     try {
       await authService.logout();
@@ -175,7 +196,19 @@ export const AuthProvider = ({ children }) => {
 
   return (
     <AuthContext.Provider
-      value={{ user, token, loading, isAuthenticated, login, register, verifyOtp, resendOtp, logout }}
+      value={{
+        user,
+        token,
+        loading,
+        isAuthenticated,
+        login,
+        register,
+        verifyOtp,
+        resendOtp,
+        forgotPassword,
+        resetPassword,
+        logout,
+      }}
     >
       {children}
     </AuthContext.Provider>

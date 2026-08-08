@@ -154,25 +154,17 @@ export default function Login() {
                   <FiAlertCircle size={14} className="mt-0.5 flex-shrink-0" /> {errors.password}
                 </p>
               )}
-              
-              {/* Password Requirements Info */}
-              {/* <div className="mt-2 p-2.5 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-blue-900 text-xs font-semibold mb-1">Password Requirements:</p>
-                <ul className="text-blue-800 text-xs space-y-0.5">
-                  <li>✓ At least 8 characters</li>
-                  <li>✓ One uppercase letter (A-Z)</li>
-                  <li>✓ One lowercase letter (a-z)</li>
-                  <li>✓ One number (0-9)</li>
-                </ul>
-              </div> */}
             </div>
 
-            {/* Remember Me */}
-            <div className="flex items-center">
+            {/* Remember Me + Forgot Password */}
+            <div className="flex items-center justify-between">
               <label className="flex items-center text-slate-600 hover:text-slate-700 cursor-pointer">
                 <input type="checkbox" className="w-4 h-4 rounded border-slate-300 bg-white accent-accent-600" />
                 <span className="ml-2 text-sm">Remember me</span>
               </label>
+              <Link to="/forgot-password" className="text-sm text-accent-600 hover:text-accent-700 font-medium transition">
+                Forgot password?
+              </Link>
             </div>
 
             {/* Submit Button */}
