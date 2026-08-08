@@ -83,6 +83,15 @@ def require_permission(permission_name):
         return wrapped
     return decorator
 
+# ---------- Helper: required-field validation ----------
+def require_fields(data, fields):
+    """Check that all required fields are present and non-empty.
+    Returns a (response, status_code) tuple to return immediately if invalid, else None."""
+    missing = [f for f in fields if data.get(f) in (None, '', [])]
+    if missing:
+        return jsonify({"success": False, "error": f"Missing required field(s): {', '.join(missing)}"}), 400
+    return None
+
 # ---------- PRODUCTS ----------
 @app.route('/api/products', methods=['GET'])
 def get_products():
@@ -109,7 +118,10 @@ def get_product(product_id):
 @app.route('/api/products', methods=['POST'])
 @require_permission('products.create')
 def create_product():
-    data = request.json
+    data = request.json or {}
+    err = require_fields(data, ['sku', 'product_name', 'category_id', 'supplier_id', 'cost_price', 'selling_price'])
+    if err:
+        return err
     result = execute_transaction([
         ("""INSERT INTO products (sku, product_name, category_id, supplier_id, cost_price, selling_price, stock_quantity)
             VALUES (%s,%s,%s,%s,%s,%s,%s)""",
@@ -124,7 +136,10 @@ def create_product():
 @app.route('/api/products/<int:product_id>', methods=['PUT'])
 @require_permission('products.update')
 def update_product(product_id):
-    data = request.json
+    data = request.json or {}
+    err = require_fields(data, ['stock_quantity', 'selling_price'])
+    if err:
+        return err
     result = execute_transaction([
         ("""UPDATE products SET stock_quantity = %s, selling_price = %s WHERE product_id = %s""",
          (data['stock_quantity'], data['selling_price'], product_id))
@@ -234,6 +249,14 @@ def create_purchase_order():
     data = request.json or {}
     user_id = g.user_id
 
+    err = require_fields(data, ['supplier_id', 'items'])
+    if err:
+        return err
+    for item in data.get('items', []):
+        item_err = require_fields(item, ['product_id', 'quantity', 'unit_cost'])
+        if item_err:
+            return item_err
+
     conn = get_connection()
     cur = conn.cursor()
     try:
@@ -278,7 +301,10 @@ def get_customers():
 @app.route('/api/customers', methods=['POST'])
 @require_permission('orders.create')
 def create_customer():
-    data = request.json
+    data = request.json or {}
+    err = require_fields(data, ['customer_name'])
+    if err:
+        return err
     result = execute_transaction([
         ("""INSERT INTO customers (customer_name, email, phone, customer_type)
             VALUES (%s,%s,%s,%s)""",
@@ -307,8 +333,16 @@ def get_orders():
 @app.route('/api/orders', methods=['POST'])
 @require_permission('orders.create')
 def create_order():
-    data = request.json
+    data = request.json or {}
     user_id = g.user_id
+
+    err = require_fields(data, ['customer_id', 'total_amount', 'items'])
+    if err:
+        return err
+    for item in data.get('items', []):
+        item_err = require_fields(item, ['product_id', 'quantity', 'unit_price'])
+        if item_err:
+            return item_err
 
     conn = get_connection()
     cur = conn.cursor()
@@ -465,7 +499,10 @@ def get_inventory_transactions():
 @app.route('/api/inventory/stock-in', methods=['POST'])
 @require_permission('products.update')
 def stock_in():
-    data = request.json
+    data = request.json or {}
+    err = require_fields(data, ['product_id', 'quantity'])
+    if err:
+        return err
     user_id = g.user_id
     result = execute_transaction([
         ("""INSERT INTO inventory_transactions (product_id, user_id, transaction_type, quantity, remarks)
@@ -481,7 +518,10 @@ def stock_in():
 @app.route('/api/inventory/stock-out', methods=['POST'])
 @require_permission('products.update')
 def stock_out():
-    data = request.json
+    data = request.json or {}
+    err = require_fields(data, ['product_id', 'quantity'])
+    if err:
+        return err
     user_id = g.user_id
     result = execute_transaction([
         ("""INSERT INTO inventory_transactions (product_id, user_id, transaction_type, quantity, remarks)
