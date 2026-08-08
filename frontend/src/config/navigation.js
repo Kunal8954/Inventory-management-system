@@ -106,6 +106,7 @@ export const navGroups = [
     id: "reports",
     label: "Reports",
     icon: FaFileAlt,
+    staffHidden : true,
     items: [
       {
         label: "Reports",

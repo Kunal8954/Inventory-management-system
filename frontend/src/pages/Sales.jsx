@@ -3,10 +3,13 @@ import { EmptyState, Skeleton, Button, Modal, Notification } from '../components
 import { fetchOrders, createOrder, updateOrderPayment } from '../services/salesService';
 import { fetchCustomers } from '../services/customerService';
 import { fetchProducts } from '../services/productService';
+import { useAuth } from '../contexts/AuthContext';
 
 const emptyItem = { product_id: '', quantity: '1', unit_price: '' };
 
 export default function Sales() {
+  const { user } = useAuth();
+  const isStaff = user?.role === 'staff';
   const [orders, setOrders] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [products, setProducts] = useState([]);
@@ -292,15 +295,17 @@ export default function Sales() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className={`grid grid-cols-1 ${isStaff ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-4`}>
         <div className="bg-white shadow rounded-lg p-4">
           <div className="text-sm text-slate-500">Total Orders</div>
           <div className="text-2xl font-semibold">{totalOrders}</div>
         </div>
-        <div className="bg-white shadow rounded-lg p-4">
-          <div className="text-sm text-slate-500">Total Revenue</div>
-          <div className="text-2xl font-semibold">{totalRevenue.toLocaleString('en-IN', { style: 'currency', currency: 'INR' })}</div>
-        </div>
+        {!isStaff && (
+          <div className="bg-white shadow rounded-lg p-4">
+            <div className="text-sm text-slate-500">Total Revenue</div>
+            <div className="text-2xl font-semibold">{totalRevenue.toLocaleString('en-IN', { style: 'currency', currency: 'INR' })}</div>
+          </div>
+        )}
         <div className="bg-white shadow rounded-lg p-4">
           <div className="text-sm text-slate-500">Pending Orders</div>
           <div className="text-2xl font-semibold">{pendingCount}</div>

@@ -21,8 +21,13 @@ export default function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onClo
     })
   }
 
-  // Hide admin-only groups (e.g. Users) from anyone who isn't an admin
-  const visibleGroups = navGroups.filter((group) => !group.adminOnly || user?.role === 'admin')
+  // Hide admin-only groups (e.g. Users) from anyone who isn't an admin,
+  // and hide staff-hidden groups (e.g. Reports/financials) from Staff specifically
+  const visibleGroups = navGroups.filter((group) => {
+    if (group.adminOnly && user?.role !== 'admin') return false
+    if (group.staffHidden && user?.role === 'staff') return false
+    return true
+  })
 
   // Filter groups and items based on search
   const filteredGroups = searchQuery

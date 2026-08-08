@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { EmptyState, Skeleton } from '../components/common';
 import { fetchInventoryStats } from '../services/inventoryService';
 import { fetchOrders } from '../services/salesService';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function Reports() {
+  const { user } = useAuth();
   const [stats, setStats] = useState(null);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -43,6 +45,22 @@ export default function Reports() {
     () => orders.reduce((sum, order) => sum + (Number(order.total_amount || order.total || 0) || 0), 0),
     [orders]
   );
+
+  // Financial reports are restricted to Admin and Manager — Staff shouldn't see revenue/inventory value figures.
+  if (user?.role === 'staff') {
+    return (
+      <div className="space-y-6">
+        <div>
+          <p className="text-sm text-slate-500">Dashboard &gt; Reports</p>
+          <h1 className="mt-1 text-3xl font-bold text-slate-900">Reports</h1>
+        </div>
+        <EmptyState
+          title="Restricted"
+          description="Financial reports are only visible to Admin and Manager accounts."
+        />
+      </div>
+    );
+  }
 
   if (loading) {
     return (

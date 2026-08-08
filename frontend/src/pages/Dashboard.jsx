@@ -11,6 +11,7 @@ import {
 import { Button, EmptyState, Skeleton } from '../components/common';
 import { useInventory } from '../hooks/useInventory';
 import { fetchOrders } from '../services/salesService';
+import { useAuth } from '../contexts/AuthContext';
 import {
   formatCurrency,
   formatDateTime,
@@ -19,6 +20,8 @@ import {
 } from '../utils/formatters';
 
 export default function Dashboard() {
+  const { user } = useAuth();
+  const isStaff = user?.role === 'staff';
   const { inventory, stats, lowStockAlerts, transactions, loading, error, refetch } = useInventory();
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
@@ -181,18 +184,20 @@ export default function Dashboard() {
           <p className="text-xs text-slate-500 mt-3">Pulled from the live orders endpoint</p>
         </div>
 
-        <div className="bg-white rounded-xl shadow-soft-md p-6 border border-slate-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-slate-600 mb-1">Inventory Value</p>
-              <p className="text-3xl font-bold text-slate-900">{inventoryValue}</p>
+        {!isStaff && (
+          <div className="bg-white rounded-xl shadow-soft-md p-6 border border-slate-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-600 mb-1">Inventory Value</p>
+                <p className="text-3xl font-bold text-slate-900">{inventoryValue}</p>
+              </div>
+              <div className="w-12 h-12 rounded-lg bg-green-100 flex items-center justify-center">
+                <FiDollarSign className="text-green-600 text-xl" />
+              </div>
             </div>
-            <div className="w-12 h-12 rounded-lg bg-green-100 flex items-center justify-center">
-              <FiDollarSign className="text-green-600 text-xl" />
-            </div>
+            <p className="text-xs text-slate-500 mt-3">Computed from current stock and pricing</p>
           </div>
-          <p className="text-xs text-slate-500 mt-3">Computed from current stock and pricing</p>
-        </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
