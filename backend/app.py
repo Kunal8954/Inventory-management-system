@@ -665,6 +665,84 @@ def api_auth_register():
     return jsonify({"success": True, "message": "OTP sent to your email", "email": email}), 201
 
 
+@app.route('/api/shop/register', methods=['POST'])
+def api_shop_register():
+    """Customer-facing registration. Creates a users row (role='Customer') AND a
+    linked customers row in the same transaction, then sends the same OTP flow
+    used for staff registration."""
+    data = request.json or {}
+    err = require_fields(data, ['name', 'email', 'password'])
+    if err:
+        return err
+
+    name = data.get('name', '').strip()
+    email = data.get('email', '').strip()
+    password = data.get('password', '')
+    phone = data.get('phone', '').strip()
+
+    if len(password) < 6:
+        return jsonify({"success": False, "error": "Password must be at least 6 characters"}), 400
+
+    parts = name.split()
+    first_name = parts[0]
+    last_name = ' '.join(parts[1:]) if len(parts) > 1 else ''
+
+    base_username = email.split('@')[0]
+    username = base_username
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM users WHERE email = %s", (email,))
+    if cur.fetchone()[0] > 0:
+        cur.close()
+        conn.close()
+        return jsonify({"success": False, "error": "Email already registered"}), 409
+
+    suffix = 0
+    while True:
+        cur.execute("SELECT COUNT(*) FROM users WHERE username = %s", (username,))
+        if cur.fetchone()[0] == 0:
+            break
+        suffix += 1
+        username = f"{base_username}{suffix}"
+
+    cur.execute("SELECT role_id FROM roles WHERE role_name = 'Customer' LIMIT 1")
+    row = cur.fetchone()
+    role_id = row[0] if row else None
+
+    pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    otp_code = f"{random.randint(0, 999999):06d}"
+
+    try:
+        cur.execute(
+            """INSERT INTO users
+               (first_name, last_name, username, email, password_hash, role, role_id, is_verified, otp_code, otp_expires_at)
+               VALUES (%s,%s,%s,%s,%s,'Customer',%s,0,%s, DATE_ADD(NOW(), INTERVAL 10 MINUTE))""",
+            (first_name, last_name, username, email, pw_hash, role_id, otp_code)
+        )
+        new_user_id = cur.lastrowid
+
+        cur.execute(
+            "INSERT INTO customers (customer_name, email, phone, user_id) VALUES (%s,%s,%s,%s)",
+            (name, email, phone or None, new_user_id)
+        )
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        return jsonify({"success": False, "error": str(e)}), 400
+
+    cur.close()
+    conn.close()
+
+    try:
+        send_otp_email(email, otp_code)
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Account created but failed to send OTP email: {str(e)}"}), 500
+
+    return jsonify({"success": True, "message": "OTP sent to your email", "email": email}), 201
+
+
 @app.route('/api/auth/verify-otp', methods=['POST'])
 @limiter.limit("10 per minute")
 def api_auth_verify_otp():
@@ -850,6 +928,90 @@ def api_auth_verify():
 @app.route('/api/auth/logout', methods=['POST'])
 def api_auth_logout():
     return jsonify({"success": True})
+
+# ---------- SHOP (Customer-facing ordering) ----------
+def get_customer_id_for_user(user_id):
+    """Look up the customers.customer_id linked to a given users.user_id, or None."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT customer_id FROM customers WHERE user_id = %s", (user_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row[0] if row else None
+
+
+@app.route('/api/shop/orders', methods=['GET'])
+@require_permission('shop.order')
+def get_my_orders():
+    customer_id = get_customer_id_for_user(g.user_id)
+    if not customer_id:
+        return jsonify({"error": "No linked customer record for this account"}), 400
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("""
+        SELECT o.*,
+               (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.order_id) AS item_count
+        FROM orders o
+        WHERE o.customer_id = %s
+        ORDER BY o.order_id DESC
+    """, (customer_id,))
+    data = cur.fetchall()
+    cur.close()
+    conn.close()
+    return jsonify(data)
+
+
+@app.route('/api/shop/orders', methods=['POST'])
+@require_permission('shop.order')
+def create_my_order():
+    data = request.json or {}
+    err = require_fields(data, ['items'])
+    if err:
+        return err
+    for item in data.get('items', []):
+        item_err = require_fields(item, ['product_id', 'quantity', 'unit_price'])
+        if item_err:
+            return item_err
+
+    customer_id = get_customer_id_for_user(g.user_id)
+    if not customer_id:
+        return jsonify({"error": "No linked customer record for this account"}), 400
+
+    total_amount = sum(item['quantity'] * item['unit_price'] for item in data['items'])
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SET @current_user_id = %s", (g.user_id,))
+        conn.start_transaction()
+
+        # Customer-placed orders start as a Pending request. Stock is NOT touched here —
+        # staff reviews and approves it separately, which is when stock actually moves.
+        cur.execute(
+            "INSERT INTO orders (customer_id, user_id, total_amount, order_status, payment_status) VALUES (%s,%s,%s,'Pending','Pending')",
+            (customer_id, g.user_id, total_amount)
+        )
+        order_id = cur.lastrowid
+
+        for item in data['items']:
+            cur.execute(
+                """INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal)
+                   VALUES (%s,%s,%s,%s,%s)""",
+                (order_id, item['product_id'], item['quantity'], item['unit_price'],
+                 item['quantity'] * item['unit_price'])
+            )
+
+        conn.commit()
+        return jsonify({"message": "Order request submitted", "order_id": order_id}), 201
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 400
+    finally:
+        cur.close()
+        conn.close()
+
 
 # INVENTORY endpoints for React frontend (token-based)
 @app.route('/api/inventory', methods=['GET'])
