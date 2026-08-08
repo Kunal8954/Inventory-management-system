@@ -353,6 +353,18 @@ def create_order():
         cur.close()
         conn.close()
 
+@app.route('/api/orders/<int:order_id>/payment', methods=['PUT'])
+@require_permission('orders.create')
+def update_order_payment(order_id):
+    data = request.json or {}
+    payment_status = data.get('payment_status', 'Paid')
+    result = execute_transaction([
+        ("UPDATE orders SET payment_status = %s WHERE order_id = %s", (payment_status, order_id))
+    ], user_id=g.user_id)
+    if result['success']:
+        return jsonify({"message": "Payment status updated"})
+    return jsonify({"error": result['error']}), 400
+
 # ---------- INVENTORY TRANSACTIONS (Stock In/Out log) ----------
 @app.route('/api/inventory/transactions', methods=['GET'])
 def get_inventory_transactions():

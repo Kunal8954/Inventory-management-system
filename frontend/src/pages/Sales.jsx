@@ -3,6 +3,7 @@ import { EmptyState, Skeleton, Button, Modal, Notification } from '../components
 import { fetchOrders, createOrder } from '../services/salesService';
 import { fetchCustomers } from '../services/customerService';
 import { fetchProducts } from '../services/productService';
+import { fetchOrders, createOrder, updateOrderPayment } from '../services/salesService';
 
 const emptyItem = { product_id: '', quantity: '1', unit_price: '' };
 
@@ -316,7 +317,26 @@ export default function Sales() {
                 <td className="px-6 py-4">{o.order_id || o.id}</td>
                 <td className="px-6 py-4">{o.customer_name || o.customer || '-'}</td>
                 <td className="px-6 py-4">{(o.total_amount || o.total || 0).toLocaleString ? (o.total_amount || o.total || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' }) : o.total_amount || o.total || 0}</td>
-                <td className="px-6 py-4">{o.payment_status || o.paymentStatus || '-'}</td>
+                <td className="px-6 py-4">
+  <div className="flex items-center gap-2">
+    {o.payment_status || o.paymentStatus || '-'}
+    {(o.payment_status || o.paymentStatus) === 'Pending' && (
+      <button
+        onClick={async () => {
+          try {
+            await updateOrderPayment(o.order_id || o.id, 'Paid');
+            await load();
+          } catch (err) {
+            alert(err.message || 'Failed to update payment');
+          }
+        }}
+        className="text-xs text-accent-600 hover:text-accent-700 font-medium underline"
+      >
+        Mark Paid
+      </button>
+    )}
+  </div>
+</td>
                 <td className="px-6 py-4">{o.order_status || o.status || '-'}</td>
                 <td className="px-6 py-4">{(o.order_date || o.created_at || o.createdAt) ? new Date(o.order_date || o.created_at || o.createdAt).toLocaleString() : '-'}</td>
               </tr>

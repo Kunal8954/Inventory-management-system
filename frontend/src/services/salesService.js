@@ -15,5 +15,12 @@ export const createOrder = async (payload) => {
     throw new Error(error.message || 'Failed to create order');
   }
 };
+export const updateOrderPayment = async (orderId, paymentStatus = 'Paid') => {
+  try {
+    return await api.put(`/orders/${orderId}/payment`, { payment_status: paymentStatus });
+  } catch (error) {
+    throw new Error(error.message || 'Failed to update payment status');
+  }
+};
 
-export default { fetchOrders, createOrder };
+export default { fetchOrders, createOrder, updateOrderPayment };
