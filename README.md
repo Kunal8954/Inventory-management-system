@@ -8,8 +8,8 @@ StockPilot is a full-stack inventory management system built to demonstrate core
 
 ## 🔗 Live Demo
 
-- **Frontend:** _add your Vercel URL here_
-- **Backend API:** _add your Railway URL here_
+- **Frontend:** https://inventory-management-system-three-teal.vercel.app
+- **Backend API:** https://inventory-management-system-production-702e.up.railway.app
 - **Demo login:** create an account via Register, or use a seeded demo account (see below)
 
 ---
