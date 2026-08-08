@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import { EmptyState, Skeleton, Button, Modal, Notification } from '../components/common';
-import { fetchOrders, createOrder } from '../services/salesService';
+import { fetchOrders, createOrder, updateOrderPayment } from '../services/salesService';
 import { fetchCustomers } from '../services/customerService';
 import { fetchProducts } from '../services/productService';
-import { fetchOrders, createOrder, updateOrderPayment } from '../services/salesService';
 
 const emptyItem = { product_id: '', quantity: '1', unit_price: '' };
 
@@ -126,6 +125,15 @@ export default function Sales() {
       setFormError(err.message || 'Failed to create sale');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleMarkPaid = async (orderId) => {
+    try {
+      await updateOrderPayment(orderId, 'Paid');
+      await load();
+    } catch (err) {
+      alert(err.message || 'Failed to update payment status');
     }
   };
 
@@ -312,35 +320,31 @@ export default function Sales() {
             </tr>
           </thead>
           <tbody>
-            {orders.map((o) => (
-              <tr key={o.order_id || o.id} className="border-b last:border-b-0">
-                <td className="px-6 py-4">{o.order_id || o.id}</td>
-                <td className="px-6 py-4">{o.customer_name || o.customer || '-'}</td>
-                <td className="px-6 py-4">{(o.total_amount || o.total || 0).toLocaleString ? (o.total_amount || o.total || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' }) : o.total_amount || o.total || 0}</td>
-                <td className="px-6 py-4">
-  <div className="flex items-center gap-2">
-    {o.payment_status || o.paymentStatus || '-'}
-    {(o.payment_status || o.paymentStatus) === 'Pending' && (
-      <button
-        onClick={async () => {
-          try {
-            await updateOrderPayment(o.order_id || o.id, 'Paid');
-            await load();
-          } catch (err) {
-            alert(err.message || 'Failed to update payment');
-          }
-        }}
-        className="text-xs text-accent-600 hover:text-accent-700 font-medium underline"
-      >
-        Mark Paid
-      </button>
-    )}
-  </div>
-</td>
-                <td className="px-6 py-4">{o.order_status || o.status || '-'}</td>
-                <td className="px-6 py-4">{(o.order_date || o.created_at || o.createdAt) ? new Date(o.order_date || o.created_at || o.createdAt).toLocaleString() : '-'}</td>
-              </tr>
-            ))}
+            {orders.map((o) => {
+              const paymentStatus = o.payment_status || o.paymentStatus || '-';
+              return (
+                <tr key={o.order_id || o.id} className="border-b last:border-b-0">
+                  <td className="px-6 py-4">{o.order_id || o.id}</td>
+                  <td className="px-6 py-4">{o.customer_name || o.customer || '-'}</td>
+                  <td className="px-6 py-4">{(o.total_amount || o.total || 0).toLocaleString ? (o.total_amount || o.total || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' }) : o.total_amount || o.total || 0}</td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2">
+                      <span>{paymentStatus}</span>
+                      {paymentStatus === 'Pending' && (
+                        <button
+                          onClick={() => handleMarkPaid(o.order_id || o.id)}
+                          className="text-xs text-accent-600 hover:text-accent-700 font-medium underline"
+                        >
+                          Mark Paid
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">{o.order_status || o.status || '-'}</td>
+                  <td className="px-6 py-4">{(o.order_date || o.created_at || o.createdAt) ? new Date(o.order_date || o.created_at || o.createdAt).toLocaleString() : '-'}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
