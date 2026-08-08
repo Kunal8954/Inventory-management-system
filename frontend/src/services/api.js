@@ -56,7 +56,7 @@ async function request(path, { method = 'GET', body = null, auth = true, headers
 	}
 
 	if (!res.ok) {
-		const message = (data && data.message) || data || res.statusText || 'Request failed';
+		const message = (data && (data.error || data.message)) || res.statusText || 'Request failed';
 		const e = new Error(message);
 		e.status = res.status;
 		e.response = data;
