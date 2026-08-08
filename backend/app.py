@@ -17,18 +17,11 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY")
 
-CORS(
-    app,
-    supports_credentials=True,
-    resources={
-        r"/*": {
-            "origins": [
-                "http://localhost:5173",
-                "https://inventory-management-system-three-teal.vercel.app"
-            ]
-        }
-    }
-)
+CORS(app, supports_credentials=True, resources={r"/*": {"origins": [
+    "http://localhost:5173",
+    r"https://.*\.vercel\.app",
+]}})
+
 limiter = Limiter(get_remote_address, app=app, default_limits=["200 per hour"])
 
 resend.api_key = os.getenv("RESEND_API_KEY")
