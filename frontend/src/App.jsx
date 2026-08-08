@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
 import Layout from "./components/layout/Layout";
 import ProtectedRoute from "./components/ProtectedRoute";
+import Users from './pages/Users';
 
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -41,6 +42,7 @@ function App() {
             <Route path="/inventory" element={<Inventory />} />
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/products" element={<Products />} />
+            <Route path="/users" element={<Users />} />
             <Route path="/customers" element={<Customers />} />
             <Route path="/categories" element={<Categories />} />
             <Route path="/suppliers" element={<Suppliers />} />

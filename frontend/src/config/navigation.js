@@ -127,6 +127,19 @@ export const navGroups = [
     ],
   },
   {
+    id: "users",
+    label: "Users",
+    icon: FaUsers,
+    adminOnly: true,
+    items: [
+      {
+        label: "Users",
+        path: "/users",
+        icon: FaUsers,
+      },
+    ],
+  },
+  {
     id: "settings",
     label: "Settings",
     icon: FaCog,

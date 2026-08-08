@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { FiUser, FiMail, FiLock, FiEye, FiEyeOff, FiLoader, FiCheck, FiShield } from 'react-icons/fi';
+import { FiUser, FiMail, FiLock, FiEye, FiEyeOff, FiLoader, FiCheck } from 'react-icons/fi';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Register() {
@@ -10,7 +10,6 @@ export default function Register() {
     email: '',
     password: '',
     confirmPassword: '',
-    role: 'Staff',
   });
   const [otp, setOtp] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -57,8 +56,7 @@ export default function Register() {
       formData.name,
       formData.email,
       formData.password,
-      formData.confirmPassword,
-      formData.role
+      formData.confirmPassword
     );
     setLoading(false);
 
@@ -178,27 +176,6 @@ export default function Register() {
                       className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-lg text-slate-900 placeholder-slate-400 focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-300 transition"
                     />
                   </div>
-                </div>
-
-                {/* Role Field */}
-                <div>
-                  <label className="block text-slate-700 text-sm font-medium mb-2">
-                    Role
-                  </label>
-                  <div className="relative">
-                    <FiShield className="absolute left-3 top-3 text-slate-400 text-lg" />
-                    <select
-                      name="role"
-                      value={formData.role}
-                      onChange={handleChange}
-                      className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-300 transition appearance-none"
-                    >
-                      <option value="Staff">Staff</option>
-                      <option value="Manager">Manager</option>
-                      <option value="Admin">Admin</option>
-                    </select>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1">This decides what you can view and edit in StockPilot.</p>
                 </div>
 
                 {/* Password Field */}

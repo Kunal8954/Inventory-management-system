@@ -2,8 +2,10 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { FaBoxes, FaTimes, FaChevronLeft, FaSearch } from 'react-icons/fa'
 import { navGroups } from '../../config/navigation'
+import { useAuth } from '../../contexts/AuthContext'
 
 export default function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onCloseMobile }) {
+  const { user } = useAuth()
   const [expandedGroups, setExpandedGroups] = useState(new Set(['dashboard']))
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -19,9 +21,12 @@ export default function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onClo
     })
   }
 
+  // Hide admin-only groups (e.g. Users) from anyone who isn't an admin
+  const visibleGroups = navGroups.filter((group) => !group.adminOnly || user?.role === 'admin')
+
   // Filter groups and items based on search
   const filteredGroups = searchQuery
-    ? navGroups
+    ? visibleGroups
         .map((group) => ({
           ...group,
           items: group.items.filter(
@@ -31,7 +36,7 @@ export default function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onClo
           ),
         }))
         .filter((group) => group.items.length > 0)
-    : navGroups
+    : visibleGroups
 
   return (
     <>

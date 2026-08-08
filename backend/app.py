@@ -365,6 +365,46 @@ def update_order_payment(order_id):
         return jsonify({"message": "Payment status updated"})
     return jsonify({"error": result['error']}), 400
 
+# ---------- USER MANAGEMENT (Admin only) ----------
+@app.route('/api/users', methods=['GET'])
+@require_permission('users.manage')
+def get_users():
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("""
+        SELECT user_id, first_name, last_name, email, role, status, created_at
+        FROM users
+        ORDER BY user_id DESC
+    """)
+    data = cur.fetchall()
+    cur.close()
+    conn.close()
+    return jsonify(data)
+
+@app.route('/api/users/<int:user_id>/role', methods=['PUT'])
+@require_permission('users.manage')
+def update_user_role(user_id):
+    data = request.json or {}
+    new_role = data.get('role')
+    if new_role not in ('Admin', 'Manager', 'Staff'):
+        return jsonify({"error": "Invalid role"}), 400
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT role_id FROM roles WHERE role_name = %s LIMIT 1", (new_role,))
+    row = cur.fetchone()
+    if not row:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Role not found"}), 400
+    new_role_id = row[0]
+
+    cur.execute("UPDATE users SET role = %s, role_id = %s WHERE user_id = %s", (new_role, new_role_id, user_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({"message": "Role updated"})
+
 # ---------- INVENTORY TRANSACTIONS (Stock In/Out log) ----------
 @app.route('/api/inventory/transactions', methods=['GET'])
 def get_inventory_transactions():
