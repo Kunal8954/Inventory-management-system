@@ -18,7 +18,7 @@ app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY")
 
 CORS(app, supports_credentials=True, resources={r"/*": {"origins": [
-    "http://localhost:5173",
+    r"http://localhost:\d+",
     r"https://.*\.vercel\.app",
 ]}})
 
@@ -54,6 +54,18 @@ def send_otp_email(to_email, otp_code):
             f"Your StockPilot verification code is: {otp_code}\n\n"
             f"This code expires in 10 minutes.\n\n"
             f"If you did not request this, you can safely ignore this email."
+        ),
+    })
+
+def send_password_reset_email(to_email, otp_code):
+    resend.Emails.send({
+        "from": "StockPilot <noreply@kunalsharm.me>",
+        "to": [to_email],
+        "subject": "StockPilot - Reset your password",
+        "text": (
+            f"Your StockPilot password reset code is: {otp_code}\n\n"
+            f"This code expires in 10 minutes.\n\n"
+            f"If you did not request this, you can safely ignore this email \u2014 your password will not be changed."
         ),
     })
 
@@ -743,6 +755,88 @@ def api_auth_resend_otp():
         return jsonify({"success": False, "error": f"Failed to send OTP: {str(e)}"}), 500
 
     return jsonify({"success": True, "message": "OTP resent"})
+
+
+@app.route('/api/auth/forgot-password', methods=['POST'])
+@limiter.limit("3 per minute")
+def api_auth_forgot_password():
+    data = request.json or {}
+    email = data.get('email', '').strip()
+    if not email:
+        return jsonify({"success": False, "error": "Email required"}), 400
+
+    generic_response = jsonify({"success": True, "message": "If that email is registered, a reset code has been sent."})
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+    user = cur.fetchone()
+
+    if not user:
+        cur.close()
+        conn.close()
+        # Don't reveal whether the email is registered
+        return generic_response
+
+    otp_code = f"{random.randint(0, 999999):06d}"
+    cur.execute(
+        "UPDATE users SET otp_code = %s, otp_expires_at = DATE_ADD(NOW(), INTERVAL 10 MINUTE) WHERE email = %s",
+        (otp_code, email)
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    try:
+        send_password_reset_email(email, otp_code)
+    except Exception:
+        # Still return the generic response so we don't leak whether the email exists
+        pass
+
+    return generic_response
+
+
+@app.route('/api/auth/reset-password', methods=['POST'])
+@limiter.limit("5 per minute")
+def api_auth_reset_password():
+    data = request.json or {}
+    err = require_fields(data, ['email', 'otp', 'new_password'])
+    if err:
+        return err
+
+    email = data.get('email', '').strip()
+    otp = data.get('otp', '').strip()
+    new_password = data.get('new_password', '')
+
+    if len(new_password) < 6:
+        return jsonify({"success": False, "error": "Password must be at least 6 characters"}), 400
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+    user = cur.fetchone()
+
+    if not user or not user.get('otp_code') or user.get('otp_code') != otp:
+        cur.close()
+        conn.close()
+        return jsonify({"success": False, "error": "Invalid or expired code"}), 400
+
+    expires_at = user.get('otp_expires_at')
+    if not expires_at or datetime.now() > expires_at:
+        cur.close()
+        conn.close()
+        return jsonify({"success": False, "error": "Invalid or expired code"}), 400
+
+    pw_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
+    cur.execute(
+        "UPDATE users SET password_hash = %s, otp_code = NULL, otp_expires_at = NULL WHERE email = %s",
+        (pw_hash, email)
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"success": True, "message": "Password reset successfully. You can now log in."})
 
 
 @app.route('/api/auth/verify', methods=['GET'])
