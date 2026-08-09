@@ -177,6 +177,19 @@ export default function ShopBrowse() {
     const outOfStock = stock <= 0;
     return (
       <div key={id} className="bg-white rounded-xl border border-slate-200 shadow-soft-md p-4 flex flex-col">
+        {product.image_url ? (
+          <img
+            src={product.image_url}
+            alt={product.product_name || product.name}
+            className="w-full h-32 object-cover rounded-lg mb-3"
+          />
+        ) : (
+          <div className="w-full h-32 rounded-lg bg-slate-100 flex items-center justify-center mb-3">
+            <span className="text-2xl font-semibold text-slate-400">
+              {(product.product_name || product.name || 'P').trim().charAt(0).toUpperCase()}
+            </span>
+          </div>
+        )}
         <p className="font-semibold text-slate-900">{product.product_name || product.name}</p>
         <p className="text-xs text-slate-500 mb-1">{product.sku}</p>
         {product.description && (

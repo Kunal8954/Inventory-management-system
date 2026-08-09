@@ -94,7 +94,7 @@ export default function Products() {
             stock,
             status: getStockStatus(stock, reorderLevel),
             updatedAt: updatedAt ? formatDate(updatedAt) : "-",
-            image: null,
+            image: product.image_url || null,
             description: product.description || "",
           };
         });
@@ -140,6 +140,12 @@ export default function Products() {
 
   const handleProductCreated = () => {
     setNotification({ type: "success", message: "Product created successfully" });
+    setReloadToken((prev) => prev + 1);
+    setTimeout(() => setNotification(null), 3000);
+  };
+
+  const handleImageUploaded = () => {
+    setNotification({ type: "success", message: "Photo uploaded" });
     setReloadToken((prev) => prev + 1);
     setTimeout(() => setNotification(null), 3000);
   };
@@ -293,7 +299,7 @@ export default function Products() {
         categories={categoryOptions}
       />
 
-      <ProductTable products={currentProducts} />
+      <ProductTable products={currentProducts} onImageUploaded={handleImageUploaded} />
 
       <ProductPagination
         currentPage={currentPage}

@@ -14,6 +14,9 @@ from itsdangerous import URLSafeTimedSerializer
 
 load_dotenv()
 
+import cloudinary
+import cloudinary.uploader
+
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY")
 
@@ -25,6 +28,12 @@ CORS(app, supports_credentials=True, resources={r"/*": {"origins": [
 limiter = Limiter(get_remote_address, app=app, default_limits=["200 per hour"])
 
 resend.api_key = os.getenv("RESEND_API_KEY")
+
+cloudinary.config(
+    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.getenv("CLOUDINARY_API_KEY"),
+    api_secret=os.getenv("CLOUDINARY_API_SECRET"),
+)
 
 # ----------------------
 # Token helpers (moved up so require_permission can use them)
@@ -120,7 +129,13 @@ def require_fields(data, fields):
 def get_products():
     conn = get_connection()
     cur = conn.cursor(dictionary=True)
-    cur.execute("SELECT * FROM products")
+    cur.execute("""
+        SELECT p.*,
+               (SELECT image_url FROM product_images pi
+                WHERE pi.product_id = p.product_id AND pi.is_primary = 1
+                LIMIT 1) AS image_url
+        FROM products p
+    """)
     products = cur.fetchall()
     cur.close()
     conn.close()
@@ -155,6 +170,43 @@ def create_product():
     if result['success']:
         return jsonify({"message": "Product created"}), 201
     return jsonify({"error": result['error']}), 400
+
+@app.route('/api/products/<int:product_id>/image', methods=['POST'])
+@require_permission('products.update')
+def upload_product_image(product_id):
+    if 'image' not in request.files:
+        return jsonify({"success": False, "error": "No image file provided"}), 400
+
+    file = request.files['image']
+    if file.filename == '':
+        return jsonify({"success": False, "error": "No image file selected"}), 400
+
+    try:
+        upload_result = cloudinary.uploader.upload(file, folder="stockpilot_products")
+        image_url = upload_result.get('secure_url')
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Upload failed: {str(e)}"}), 500
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SET @current_user_id = %s", (g.user_id,))
+        conn.start_transaction()
+        # This upload becomes the product's primary photo — unset any previous one first
+        cur.execute("UPDATE product_images SET is_primary = 0 WHERE product_id = %s", (product_id,))
+        cur.execute(
+            "INSERT INTO product_images (product_id, image_url, is_primary) VALUES (%s, %s, 1)",
+            (product_id, image_url)
+        )
+        conn.commit()
+        return jsonify({"success": True, "image_url": image_url}), 201
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "error": str(e)}), 400
+    finally:
+        cur.close()
+        conn.close()
+
 
 @app.route('/api/products/<int:product_id>', methods=['PUT'])
 @require_permission('products.update')

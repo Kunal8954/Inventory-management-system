@@ -15,3 +15,15 @@ export const createProduct = async (payload) => {
     throw new Error(error.message || 'Failed to create product');
   }
 };
+
+export const uploadProductImage = async (productId, file) => {
+  try {
+    const formData = new FormData();
+    formData.append('image', file);
+    return await api.post(`/products/${productId}/image`, formData);
+  } catch (error) {
+    throw new Error(error.message || 'Failed to upload image');
+  }
+};
+
+export default { fetchProducts, createProduct, uploadProductImage };
