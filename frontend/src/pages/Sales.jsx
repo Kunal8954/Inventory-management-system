@@ -320,13 +320,22 @@ export default function Sales() {
             {pendingRequests.map((o) => (
               <div
                 key={o.order_id || o.id}
-                className="flex flex-wrap items-center justify-between gap-3 bg-white rounded-lg border border-amber-200 px-4 py-3"
+                className="flex flex-wrap items-start justify-between gap-3 bg-white rounded-lg border border-amber-200 px-4 py-3"
               >
-                <div>
+                <div className="min-w-0">
                   <p className="text-sm font-medium text-slate-900">
                     Order #{o.order_id || o.id} &middot; {o.customer_name || o.customer || 'Customer'}
                   </p>
-                  <p className="text-xs text-slate-500">
+                  {Array.isArray(o.items) && o.items.length > 0 && (
+                    <ul className="mt-1 space-y-0.5">
+                      {o.items.map((item, i) => (
+                        <li key={i} className="text-xs text-slate-500">
+                          {item.product_name} &times; {item.quantity}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="text-xs font-medium text-slate-600 mt-1">
                     {(o.total_amount || o.total || 0).toLocaleString
                       ? (o.total_amount || o.total || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' })
                       : o.total_amount || o.total || 0}
@@ -335,7 +344,7 @@ export default function Sales() {
                 <button
                   onClick={() => handleApprove(o.order_id || o.id)}
                   disabled={approvingId === (o.order_id || o.id)}
-                  className="text-sm font-medium bg-accent-600 hover:bg-accent-700 disabled:bg-slate-300 text-white px-4 py-2 rounded-lg transition"
+                  className="text-sm font-medium bg-accent-600 hover:bg-accent-700 disabled:bg-slate-300 text-white px-4 py-2 rounded-lg transition shrink-0"
                 >
                   {approvingId === (o.order_id || o.id) ? 'Approving...' : 'Approve'}
                 </button>

@@ -348,10 +348,20 @@ def get_orders():
         JOIN customers c ON o.customer_id = c.customer_id
         ORDER BY o.order_id DESC
     """)
-    data = cur.fetchall()
+    orders = cur.fetchall()
+
+    for order in orders:
+        cur.execute("""
+            SELECT oi.quantity, oi.unit_price, oi.subtotal, p.product_name
+            FROM order_items oi
+            JOIN products p ON oi.product_id = p.product_id
+            WHERE oi.order_id = %s
+        """, (order['order_id'],))
+        order['items'] = cur.fetchall()
+
     cur.close()
     conn.close()
-    return jsonify(data)
+    return jsonify(orders)
 
 @app.route('/api/orders', methods=['POST'])
 @require_permission('orders.create')
@@ -1128,6 +1138,18 @@ def create_my_order():
             )
 
         conn.commit()
+
+        try:
+            notif_cur = conn.cursor()
+            notif_cur.execute(
+                "INSERT INTO notifications (message, link) VALUES (%s, %s)",
+                (f"New order request #{order_id} \u2014 {total_amount}", "/sales")
+            )
+            conn.commit()
+            notif_cur.close()
+        except Exception:
+            pass  # The order already succeeded — a failed notification shouldn't undo it.
+
         return jsonify({"message": "Order request submitted", "order_id": order_id}), 201
     except Exception as e:
         conn.rollback()
@@ -1135,6 +1157,30 @@ def create_my_order():
     finally:
         cur.close()
         conn.close()
+
+
+# ---------- NOTIFICATIONS (shared feed for staff) ----------
+@app.route('/api/notifications', methods=['GET'])
+@require_permission('orders.view')
+def get_notifications():
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM notifications ORDER BY notification_id DESC LIMIT 50")
+    data = cur.fetchall()
+    cur.close()
+    conn.close()
+    return jsonify(data)
+
+
+@app.route('/api/notifications/<int:notification_id>/read', methods=['PUT'])
+@require_permission('orders.view')
+def mark_notification_read(notification_id):
+    result = execute_transaction([
+        ("UPDATE notifications SET is_read = 1 WHERE notification_id = %s", (notification_id,))
+    ])
+    if result['success']:
+        return jsonify({"message": "Marked as read"})
+    return jsonify({"error": result['error']}), 400
 
 
 # INVENTORY endpoints for React frontend (token-based)

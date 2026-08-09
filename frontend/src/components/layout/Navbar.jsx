@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { fetchProducts } from '../../services/productService'
 import { fetchSuppliers } from '../../services/supplierService'
 import { fetchCustomers } from '../../services/customerService'
+import { fetchNotifications } from '../../services/notificationService'
 
 export default function Navbar({ onOpenMobile }) {
   const [profileOpen, setProfileOpen] = useState(false)
@@ -17,6 +18,9 @@ export default function Navbar({ onOpenMobile }) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [dataset, setDataset] = useState({ products: [], suppliers: [], customers: [] })
   const searchRef = useRef(null)
+
+  // ---- Notification badge state ----
+  const [unreadCount, setUnreadCount] = useState(0)
 
   useEffect(() => {
     function handleClickOutside(e) {
@@ -43,6 +47,19 @@ export default function Navbar({ onOpenMobile }) {
         customers: customersRes.status === 'fulfilled' ? customersRes.value || [] : [],
       })
     })
+    return () => (mounted = false)
+  }, [])
+
+  // Load real unread notification count once on mount
+  useEffect(() => {
+    let mounted = true
+    fetchNotifications()
+      .then((data) => {
+        if (!mounted) return
+        const unread = Array.isArray(data) ? data.filter((n) => !n.is_read).length : 0
+        setUnreadCount(unread)
+      })
+      .catch(() => {})
     return () => (mounted = false)
   }, [])
 
@@ -191,7 +208,11 @@ export default function Navbar({ onOpenMobile }) {
             aria-label="Notifications"
           >
             <FaBell className="text-lg" />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-accent-500 rounded-full ring-2 ring-white" />
+            {unreadCount > 0 && (
+              <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 flex items-center justify-center text-[10px] font-bold bg-red-500 text-white rounded-full ring-2 ring-white">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
           </button>
 
           {/* Profile dropdown */}
