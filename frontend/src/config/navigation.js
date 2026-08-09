@@ -11,6 +11,7 @@ import {
   FaBell,
   FaCog,
   FaChevronDown,
+  FaMoneyBillWave,
 } from "react-icons/fa";
 import { FiPackage, FiAlertTriangle, FiTrendingDown } from "react-icons/fi";
 
@@ -98,6 +99,19 @@ export const navGroups = [
         label: "Customers",
         path: "/customers",
         icon: FaUsers,
+      },
+    ],
+  },
+
+  {
+    id: "payments",
+    label: "Pending Payments",
+    icon: FaMoneyBillWave,
+    items: [
+      {
+        label: "Pending Payments",
+        path: "/pending-payments",
+        icon: FaMoneyBillWave,
       },
     ],
   },

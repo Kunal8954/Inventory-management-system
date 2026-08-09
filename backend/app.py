@@ -93,6 +93,35 @@ def send_order_approved_email(to_email, order_id, total_amount):
         ),
     })
 
+
+def send_payment_reminder_email(to_email, entity_name, order_id, total_amount, direction):
+    """direction: 'customer' (they owe us) or 'vendor' (we owe them)."""
+    if direction == 'customer':
+        subject = f"StockPilot - Payment reminder for order #{order_id}"
+        body = (
+            f"Hi {entity_name},\n\n"
+            f"This is a friendly reminder that payment for order #{order_id} "
+            f"(total: {total_amount}) is still pending. Please arrange payment at your earliest convenience.\n\n"
+            f"If you've already paid, please disregard this message."
+        )
+    else:
+        subject = f"StockPilot - Payment reminder for purchase order #{order_id}"
+        body = (
+            f"Hi {entity_name},\n\n"
+            f"This is a reminder regarding purchase order #{order_id} "
+            f"(total: {total_amount}), which we show as still pending payment on our end. "
+            f"We wanted to flag this so it doesn't get missed.\n\n"
+            f"If this has already been settled, please disregard this message."
+        )
+
+    resend.Emails.send({
+        "from": "StockPilot <noreply@kunalsharm.me>",
+        "to": [to_email],
+        "subject": subject,
+        "text": body,
+    })
+
+
 # ---------- Helper: permission-check decorator (Bearer-token based) ----------
 def require_permission(permission_name):
     def decorator(f):
@@ -381,6 +410,181 @@ def create_supplier():
     if result['success']:
         return jsonify({"message": "Supplier created"}), 201
     return jsonify({"error": result['error']}), 400
+
+@app.route('/api/dashboard/financial-summary', methods=['GET'])
+@require_permission('dashboard.financials')
+def get_financial_summary():
+    """Admin-only. Distinct from the existing Inventory Value stat (which values
+    current stock at selling price) — this shows what's actually happening
+    financially: cost basis of stock on hand, real revenue from completed sales,
+    and real profit (revenue minus the cost of what was actually sold)."""
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT COUNT(*) FROM products")
+    total_products = cur.fetchone()[0]
+
+    cur.execute("SELECT COALESCE(SUM(cost_price * stock_quantity), 0) FROM products")
+    total_cost_value = cur.fetchone()[0]
+
+    cur.execute("SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE order_status = 'Completed'")
+    total_revenue = cur.fetchone()[0]
+
+    cur.execute("""
+        SELECT COALESCE(SUM(oi.quantity * (oi.unit_price - p.cost_price)), 0)
+        FROM order_items oi
+        JOIN orders o ON oi.order_id = o.order_id
+        JOIN products p ON oi.product_id = p.product_id
+        WHERE o.order_status = 'Completed'
+    """)
+    total_profit = cur.fetchone()[0]
+
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "total_products": int(total_products),
+        "total_cost_value": float(total_cost_value),
+        "total_revenue": float(total_revenue),
+        "total_profit": float(total_profit)
+    })
+
+
+# ---------- PENDING PAYMENT REMINDERS ----------
+@app.route('/api/payments/pending', methods=['GET'])
+@require_permission('orders.view')
+def get_pending_payments():
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+
+    cur.execute("""
+        SELECT o.order_id, o.total_amount, o.order_date, o.last_reminder_sent_at,
+               c.customer_id, c.customer_name, c.email,
+               COALESCE(c.reminder_interval_days, 7) AS reminder_interval_days,
+               DATEDIFF(NOW(), o.order_date) AS days_pending
+        FROM orders o
+        JOIN customers c ON o.customer_id = c.customer_id
+        WHERE o.payment_status = 'Pending'
+        ORDER BY days_pending DESC
+    """)
+    customer_payments = cur.fetchall()
+    for row in customer_payments:
+        row['needs_reminder'] = row['days_pending'] >= row['reminder_interval_days']
+
+    cur.execute("""
+        SELECT po.purchase_order_id, po.total_amount, po.order_date, po.last_reminder_sent_at,
+               s.supplier_id, s.supplier_name, s.email,
+               COALESCE(s.reminder_interval_days, 7) AS reminder_interval_days,
+               DATEDIFF(NOW(), po.order_date) AS days_pending
+        FROM purchase_orders po
+        JOIN suppliers s ON po.supplier_id = s.supplier_id
+        WHERE po.payment_status = 'Pending'
+        ORDER BY days_pending DESC
+    """)
+    vendor_payments = cur.fetchall()
+    for row in vendor_payments:
+        row['needs_reminder'] = row['days_pending'] >= row['reminder_interval_days']
+
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "customer_payments": customer_payments,
+        "vendor_payments": vendor_payments
+    })
+
+
+@app.route('/api/customers/<int:customer_id>/reminder-interval', methods=['PUT'])
+@require_permission('orders.create')
+def set_customer_reminder_interval(customer_id):
+    data = request.json or {}
+    err = require_fields(data, ['reminder_interval_days'])
+    if err:
+        return err
+    result = execute_transaction([
+        ("UPDATE customers SET reminder_interval_days = %s WHERE customer_id = %s",
+         (data['reminder_interval_days'], customer_id))
+    ], user_id=g.user_id)
+    if result['success']:
+        return jsonify({"message": "Reminder interval updated"})
+    return jsonify({"error": result['error']}), 400
+
+
+@app.route('/api/suppliers/<int:supplier_id>/reminder-interval', methods=['PUT'])
+@require_permission('orders.create')
+def set_supplier_reminder_interval(supplier_id):
+    data = request.json or {}
+    err = require_fields(data, ['reminder_interval_days'])
+    if err:
+        return err
+    result = execute_transaction([
+        ("UPDATE suppliers SET reminder_interval_days = %s WHERE supplier_id = %s",
+         (data['reminder_interval_days'], supplier_id))
+    ], user_id=g.user_id)
+    if result['success']:
+        return jsonify({"message": "Reminder interval updated"})
+    return jsonify({"error": result['error']}), 400
+
+
+@app.route('/api/orders/<int:order_id>/send-payment-reminder', methods=['POST'])
+@require_permission('orders.create')
+def send_customer_payment_reminder(order_id):
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("""
+        SELECT o.order_id, o.total_amount, c.customer_name, c.email
+        FROM orders o JOIN customers c ON o.customer_id = c.customer_id
+        WHERE o.order_id = %s AND o.payment_status = 'Pending'
+    """, (order_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row:
+        return jsonify({"error": "Order not found or not pending payment"}), 404
+    if not row.get('email'):
+        return jsonify({"error": "This customer has no email on file"}), 400
+
+    try:
+        send_payment_reminder_email(row['email'], row['customer_name'], order_id, row['total_amount'], 'customer')
+    except Exception as e:
+        return jsonify({"error": f"Failed to send reminder: {str(e)}"}), 500
+
+    execute_transaction([
+        ("UPDATE orders SET last_reminder_sent_at = NOW() WHERE order_id = %s", (order_id,))
+    ], user_id=g.user_id)
+    return jsonify({"message": "Reminder sent"})
+
+
+@app.route('/api/purchase-orders/<int:purchase_order_id>/send-payment-reminder', methods=['POST'])
+@require_permission('orders.create')
+def send_vendor_payment_reminder(purchase_order_id):
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("""
+        SELECT po.purchase_order_id, po.total_amount, s.supplier_name, s.email
+        FROM purchase_orders po JOIN suppliers s ON po.supplier_id = s.supplier_id
+        WHERE po.purchase_order_id = %s AND po.payment_status = 'Pending'
+    """, (purchase_order_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row:
+        return jsonify({"error": "Purchase order not found or not pending payment"}), 404
+    if not row.get('email'):
+        return jsonify({"error": "This supplier has no email on file"}), 400
+
+    try:
+        send_payment_reminder_email(row['email'], row['supplier_name'], purchase_order_id, row['total_amount'], 'vendor')
+    except Exception as e:
+        return jsonify({"error": f"Failed to send reminder: {str(e)}"}), 500
+
+    execute_transaction([
+        ("UPDATE purchase_orders SET last_reminder_sent_at = NOW() WHERE purchase_order_id = %s", (purchase_order_id,))
+    ], user_id=g.user_id)
+    return jsonify({"message": "Reminder sent"})
+
 
 # ---------- PURCHASE ORDERS ----------
 @app.route('/api/purchase-orders', methods=['GET'])

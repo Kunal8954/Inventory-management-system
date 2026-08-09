@@ -7,10 +7,12 @@ import {
   FiPackage,
   FiRefreshCw,
   FiShoppingCart,
+  FiTrendingUp,
 } from 'react-icons/fi';
 import { Button, EmptyState, Skeleton } from '../components/common';
 import { useInventory } from '../hooks/useInventory';
 import { fetchOrders } from '../services/salesService';
+import { fetchFinancialSummary } from '../services/dashboardService';
 import { useAuth } from '../contexts/AuthContext';
 import {
   formatCurrency,
@@ -22,10 +24,12 @@ import {
 export default function Dashboard() {
   const { user } = useAuth();
   const isStaff = user?.role === 'staff';
+  const isAdmin = user?.role === 'admin';
   const { inventory, stats, lowStockAlerts, transactions, loading, error, refetch } = useInventory();
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [ordersError, setOrdersError] = useState(null);
+  const [financials, setFinancials] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -54,6 +58,25 @@ export default function Dashboard() {
       mounted = false;
     };
   }, []);
+
+  // Admin-only — the backend also enforces this, but there's no reason to even
+  // make the call (or risk a console error) for a role that can't see it.
+  useEffect(() => {
+    if (!isAdmin) return;
+    let mounted = true;
+
+    fetchFinancialSummary()
+      .then((data) => {
+        if (mounted) setFinancials(data);
+      })
+      .catch(() => {
+        // Non-critical — the rest of the dashboard still works without this section.
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [isAdmin]);
 
   const isLoading = loading || ordersLoading;
   const combinedError = error || ordersError;
@@ -199,6 +222,39 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {isAdmin && financials && (
+        <div className="bg-white rounded-xl shadow-soft-md p-6 border border-slate-200">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <FiTrendingUp className="text-accent-600" />
+              <h2 className="text-lg font-bold text-slate-900">Financial Summary</h2>
+            </div>
+            <span className="text-xs font-medium text-slate-400 bg-slate-100 px-2 py-1 rounded-full">
+              Admin only
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+            <div>
+              <p className="text-sm text-slate-500 mb-1">Cost of Stock on Hand</p>
+              <p className="text-2xl font-bold text-slate-900">{formatCurrency(financials.total_cost_value)}</p>
+              <p className="text-xs text-slate-400 mt-1">What's currently in inventory cost to acquire</p>
+            </div>
+            <div>
+              <p className="text-sm text-slate-500 mb-1">Revenue (Completed Sales)</p>
+              <p className="text-2xl font-bold text-slate-900">{formatCurrency(financials.total_revenue)}</p>
+              <p className="text-xs text-slate-400 mt-1">Total from orders marked Completed</p>
+            </div>
+            <div>
+              <p className="text-sm text-slate-500 mb-1">Profit</p>
+              <p className={`text-2xl font-bold ${financials.total_profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {formatCurrency(financials.total_profit)}
+              </p>
+              <p className="text-xs text-slate-400 mt-1">Revenue minus the cost of goods actually sold</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white rounded-xl shadow-soft-md p-6 border border-slate-200">

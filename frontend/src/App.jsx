@@ -20,6 +20,7 @@ import InventoryHistory from "./pages/InventoryHistory";
 import Notifications from "./pages/Notifications";
 import Settings from "./pages/Settings";
 import ForgotPassword from './pages/ForgotPassword';
+import PendingPayments from "./pages/PendingPayments";
 
 import ShopLayout from './components/layout/ShopLayout';
 import ShopProtectedRoute from './components/ShopProtectedRoute';
@@ -81,6 +82,7 @@ function App() {
             <Route path="/suppliers" element={<Suppliers />} />
             <Route path="/purchases" element={<Purchases />} />
             <Route path="/sales" element={<Sales />} />
+            <Route path="/pending-payments" element={<PendingPayments />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/inventory-history" element={<InventoryHistory />} />
             <Route path="/notifications" element={<Notifications />} />
