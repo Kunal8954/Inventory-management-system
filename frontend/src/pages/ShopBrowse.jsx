@@ -5,6 +5,7 @@ import { fetchProducts } from '../services/productService';
 import { fetchCategories } from '../services/categoryService';
 import { placeOrder } from '../services/shopService';
 import { EmptyState, Skeleton, Notification } from '../components/common';
+import ProductDetailModal from '../components/shop/ProductDetailModal';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function ShopBrowse() {
@@ -26,6 +27,7 @@ export default function ShopBrowse() {
   const [placing, setPlacing] = useState(false);
   const [notification, setNotification] = useState(null);
   const [justOrdered, setJustOrdered] = useState(false);
+  const [viewingProduct, setViewingProduct] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -177,19 +179,26 @@ export default function ShopBrowse() {
     const outOfStock = stock <= 0;
     return (
       <div key={id} className="bg-white rounded-xl border border-slate-200 shadow-soft-md p-4 flex flex-col">
-        {product.image_url ? (
-          <img
-            src={product.image_url}
-            alt={product.product_name || product.name}
-            className="w-full h-32 object-contain bg-slate-50 rounded-lg mb-3"
-          />
-        ) : (
-          <div className="w-full h-32 rounded-lg bg-slate-100 flex items-center justify-center mb-3">
-            <span className="text-2xl font-semibold text-slate-400">
-              {(product.product_name || product.name || 'P').trim().charAt(0).toUpperCase()}
-            </span>
-          </div>
-        )}
+        <button
+          type="button"
+          onClick={() => setViewingProduct(product)}
+          className="w-full mb-3"
+          title="View details"
+        >
+          {product.image_url ? (
+            <img
+              src={product.image_url}
+              alt={product.product_name || product.name}
+              className="w-full h-32 object-contain bg-slate-50 rounded-lg hover:opacity-80 transition"
+            />
+          ) : (
+            <div className="w-full h-32 rounded-lg bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition">
+              <span className="text-2xl font-semibold text-slate-400">
+                {(product.product_name || product.name || 'P').trim().charAt(0).toUpperCase()}
+              </span>
+            </div>
+          )}
+        </button>
         <p className="font-semibold text-slate-900">{product.product_name || product.name}</p>
         <p className="text-xs text-slate-500 mb-1">{product.sku}</p>
         {product.description && (
@@ -394,6 +403,13 @@ export default function ShopBrowse() {
       </div>
 
       {notificationBanner}
+
+      <ProductDetailModal
+        isOpen={!!viewingProduct}
+        product={viewingProduct}
+        onClose={() => setViewingProduct(null)}
+        onAddToCart={addToCart}
+      />
     </div>
   );
 }
