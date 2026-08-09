@@ -69,6 +69,17 @@ def send_password_reset_email(to_email, otp_code):
         ),
     })
 
+def send_order_approved_email(to_email, order_id, total_amount):
+    resend.Emails.send({
+        "from": "StockPilot <noreply@kunalsharm.me>",
+        "to": [to_email],
+        "subject": f"StockPilot - Your order #{order_id} has been approved",
+        "text": (
+            f"Good news \u2014 your order #{order_id} (total: {total_amount}) has been approved and is being processed.\n\n"
+            f"You can check its status anytime under My Orders."
+        ),
+    })
+
 # ---------- Helper: permission-check decorator (Bearer-token based) ----------
 def require_permission(permission_name):
     def decorator(f):
@@ -410,6 +421,75 @@ def update_order_payment(order_id):
     if result['success']:
         return jsonify({"message": "Payment status updated"})
     return jsonify({"error": result['error']}), 400
+
+
+@app.route('/api/orders/<int:order_id>/approve', methods=['PUT'])
+@require_permission('orders.create')
+def approve_order(order_id):
+    """Approve a Pending order request (typically customer-placed). This is the
+    moment stock actually gets deducted — request-time never touches inventory."""
+    user_id = g.user_id
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM orders WHERE order_id = %s", (order_id,))
+    order = cur.fetchone()
+    if not order:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Order not found"}), 404
+    if order.get('order_status') != 'Pending':
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Only pending orders can be approved"}), 400
+
+    cur.execute("SELECT * FROM order_items WHERE order_id = %s", (order_id,))
+    items = cur.fetchall()
+    cur.close()
+
+    conn2 = get_connection()
+    cur2 = conn2.cursor()
+    try:
+        cur2.execute("SET @current_user_id = %s", (user_id,))
+        conn2.start_transaction()
+
+        for item in items:
+            cur2.execute(
+                "UPDATE products SET stock_quantity = stock_quantity - %s WHERE product_id = %s AND stock_quantity >= %s",
+                (item['quantity'], item['product_id'], item['quantity'])
+            )
+            if cur2.rowcount == 0:
+                conn2.rollback()
+                return jsonify({"error": f"Insufficient stock for product {item['product_id']}"}), 400
+
+            cur2.execute(
+                """INSERT INTO inventory_transactions (product_id, user_id, transaction_type, quantity, remarks)
+                   VALUES (%s,%s,'Stock Out',%s,%s)""",
+                (item['product_id'], user_id, item['quantity'], f"Approved order #{order_id}")
+            )
+
+        cur2.execute("UPDATE orders SET order_status = 'Completed' WHERE order_id = %s", (order_id,))
+
+        conn2.commit()
+
+        try:
+            cur3 = conn2.cursor(dictionary=True)
+            cur3.execute("SELECT email FROM customers WHERE customer_id = %s", (order['customer_id'],))
+            customer = cur3.fetchone()
+            cur3.close()
+            if customer and customer.get('email'):
+                send_order_approved_email(customer['email'], order_id, order.get('total_amount'))
+        except Exception:
+            pass  # Approval already succeeded — a failed notification shouldn't undo it.
+
+        return jsonify({"message": "Order approved and stock updated"})
+    except Exception as e:
+        conn2.rollback()
+        return jsonify({"error": str(e)}), 400
+    finally:
+        cur2.close()
+        conn2.close()
+        conn.close()
 
 # ---------- USER MANAGEMENT (Admin only) ----------
 @app.route('/api/users', methods=['GET'])
@@ -951,16 +1031,51 @@ def get_my_orders():
     conn = get_connection()
     cur = conn.cursor(dictionary=True)
     cur.execute("""
-        SELECT o.*,
-               (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.order_id) AS item_count
-        FROM orders o
+        SELECT o.* FROM orders o
         WHERE o.customer_id = %s
         ORDER BY o.order_id DESC
     """, (customer_id,))
-    data = cur.fetchall()
+    orders = cur.fetchall()
+
+    for order in orders:
+        cur.execute("""
+            SELECT oi.quantity, oi.unit_price, oi.subtotal, p.product_name
+            FROM order_items oi
+            JOIN products p ON oi.product_id = p.product_id
+            WHERE oi.order_id = %s
+        """, (order['order_id'],))
+        order['items'] = cur.fetchall()
+
     cur.close()
     conn.close()
-    return jsonify(data)
+    return jsonify(orders)
+
+
+@app.route('/api/shop/orders/<int:order_id>/cancel', methods=['PUT'])
+@require_permission('shop.order')
+def cancel_my_order(order_id):
+    customer_id = get_customer_id_for_user(g.user_id)
+    if not customer_id:
+        return jsonify({"error": "No linked customer record for this account"}), 400
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM orders WHERE order_id = %s AND customer_id = %s", (order_id, customer_id))
+    order = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not order:
+        return jsonify({"error": "Order not found"}), 404
+    if order.get('order_status') != 'Pending':
+        return jsonify({"error": "Only pending orders can be cancelled"}), 400
+
+    result = execute_transaction([
+        ("UPDATE orders SET order_status = 'Cancelled' WHERE order_id = %s", (order_id,))
+    ], user_id=g.user_id)
+    if result['success']:
+        return jsonify({"message": "Order cancelled"})
+    return jsonify({"error": result['error']}), 400
 
 
 @app.route('/api/shop/orders', methods=['POST'])
@@ -974,6 +1089,13 @@ def create_my_order():
         item_err = require_fields(item, ['product_id', 'quantity', 'unit_price'])
         if item_err:
             return item_err
+
+    payment_method = data.get('payment_method', 'COD')
+    if payment_method not in ('COD', 'Online'):
+        payment_method = 'COD'
+    delivery_address = (data.get('delivery_address') or '').strip() or None
+    delivery_city = (data.get('delivery_city') or '').strip() or None
+    delivery_phone = (data.get('delivery_phone') or '').strip() or None
 
     customer_id = get_customer_id_for_user(g.user_id)
     if not customer_id:
@@ -990,8 +1112,10 @@ def create_my_order():
         # Customer-placed orders start as a Pending request. Stock is NOT touched here —
         # staff reviews and approves it separately, which is when stock actually moves.
         cur.execute(
-            "INSERT INTO orders (customer_id, user_id, total_amount, order_status, payment_status) VALUES (%s,%s,%s,'Pending','Pending')",
-            (customer_id, g.user_id, total_amount)
+            """INSERT INTO orders
+               (customer_id, user_id, total_amount, order_status, payment_status, payment_method, delivery_address, delivery_city, delivery_phone)
+               VALUES (%s,%s,%s,'Pending','Pending',%s,%s,%s,%s)""",
+            (customer_id, g.user_id, total_amount, payment_method, delivery_address, delivery_city, delivery_phone)
         )
         order_id = cur.lastrowid
 
