@@ -16,6 +16,8 @@ load_dotenv()
 
 import cloudinary
 import cloudinary.uploader
+from google.oauth2 import id_token as google_id_token
+from google.auth.transport import requests as google_auth_requests
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY")
@@ -34,6 +36,8 @@ cloudinary.config(
     api_key=os.getenv("CLOUDINARY_API_KEY"),
     api_secret=os.getenv("CLOUDINARY_API_SECRET"),
 )
+
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 
 # ----------------------
 # Token helpers (moved up so require_permission can use them)
@@ -797,14 +801,18 @@ def stock_out():
 def api_auth_login():
     data = request.json or {}
     email = data.get('email')
+    phone = data.get('phone')
     password = data.get('password')
 
-    if not email or not password:
+    if not password or (not email and not phone):
         return jsonify({"success": False, "error": "Invalid credentials"}), 401
 
     conn = get_connection()
     cur = conn.cursor(dictionary=True)
-    cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+    if email:
+        cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+    else:
+        cur.execute("SELECT * FROM users WHERE phone = %s", (phone,))
     user = cur.fetchone()
     cur.close()
     conn.close()
@@ -829,6 +837,96 @@ def api_auth_login():
             "needsVerification": True,
             "email": email
         }), 403
+
+    user_id = user.get('user_id')
+    token = serializer.dumps({"user_id": user_id})
+    user_obj = {
+        "id": str(user_id),
+        "name": f"{user.get('first_name','').strip()} {user.get('last_name','').strip()}".strip(),
+        "email": user.get('email'),
+        "role": (user.get('role') or '').lower()
+    }
+    return jsonify({"success": True, "user": user_obj, "token": token})
+
+
+@app.route('/api/auth/google', methods=['POST'])
+def api_auth_google():
+    """Google Sign-In for the customer shop. Verifies the ID token Google's own
+    button hands back, then logs the matching account in — or creates a new
+    Customer account on first sign-in, auto-verified since Google already
+    confirmed the email."""
+    data = request.json or {}
+    credential = data.get('credential')
+    if not credential:
+        return jsonify({"success": False, "error": "Missing Google credential"}), 400
+
+    try:
+        idinfo = google_id_token.verify_oauth2_token(
+            credential, google_auth_requests.Request(), GOOGLE_CLIENT_ID
+        )
+    except Exception:
+        return jsonify({"success": False, "error": "Invalid Google credential"}), 401
+
+    email = idinfo.get('email')
+    name = (idinfo.get('name') or '').strip()
+    if not email:
+        return jsonify({"success": False, "error": "Google account has no email"}), 400
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+    user = cur.fetchone()
+
+    if not user:
+        parts = name.split() if name else ['Google', 'User']
+        first_name = parts[0]
+        last_name = ' '.join(parts[1:]) if len(parts) > 1 else ''
+
+        base_username = email.split('@')[0]
+        username = base_username
+        cur2 = conn.cursor()
+        suffix = 0
+        while True:
+            cur2.execute("SELECT COUNT(*) FROM users WHERE username = %s", (username,))
+            if cur2.fetchone()[0] == 0:
+                break
+            suffix += 1
+            username = f"{base_username}{suffix}"
+
+        cur2.execute("SELECT role_id FROM roles WHERE role_name = 'Customer' LIMIT 1")
+        row = cur2.fetchone()
+        role_id = row[0] if row else None
+
+        # Google-only accounts get an unusable random password hash — they can
+        # only ever sign in via Google, never through the password login forms.
+        random_pw_hash = bcrypt.hashpw(os.urandom(24), bcrypt.gensalt()).decode()
+
+        try:
+            cur2.execute(
+                """INSERT INTO users
+                   (first_name, last_name, username, email, password_hash, role, role_id, is_verified)
+                   VALUES (%s,%s,%s,%s,%s,'Customer',%s,1)""",
+                (first_name, last_name, username, email, random_pw_hash, role_id)
+            )
+            new_user_id = cur2.lastrowid
+            cur2.execute(
+                "INSERT INTO customers (customer_name, email, user_id) VALUES (%s,%s,%s)",
+                (name or email, email, new_user_id)
+            )
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            cur.close()
+            cur2.close()
+            conn.close()
+            return jsonify({"success": False, "error": str(e)}), 400
+        cur2.close()
+
+        cur.execute("SELECT * FROM users WHERE user_id = %s", (new_user_id,))
+        user = cur.fetchone()
+
+    cur.close()
+    conn.close()
 
     user_id = user.get('user_id')
     token = serializer.dumps({"user_id": user_id})
@@ -958,9 +1056,9 @@ def api_shop_register():
     try:
         cur.execute(
             """INSERT INTO users
-               (first_name, last_name, username, email, password_hash, role, role_id, is_verified, otp_code, otp_expires_at)
-               VALUES (%s,%s,%s,%s,%s,'Customer',%s,0,%s, DATE_ADD(NOW(), INTERVAL 10 MINUTE))""",
-            (first_name, last_name, username, email, pw_hash, role_id, otp_code)
+               (first_name, last_name, username, email, phone, password_hash, role, role_id, is_verified, otp_code, otp_expires_at)
+               VALUES (%s,%s,%s,%s,%s,%s,'Customer',%s,0,%s, DATE_ADD(NOW(), INTERVAL 10 MINUTE))""",
+            (first_name, last_name, username, email, phone or None, pw_hash, role_id, otp_code)
         )
         new_user_id = cur.lastrowid
 

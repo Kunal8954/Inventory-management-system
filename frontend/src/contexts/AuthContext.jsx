@@ -106,6 +106,24 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const loginWithGoogle = async (credential) => {
+    setLoading(true);
+    try {
+      const res = await authService.loginWithGoogle(credential);
+      const userFromRes = applySession(res);
+
+      if (userFromRes) {
+        return { success: true, user: userFromRes };
+      }
+
+      return { success: false, error: res && res.error ? res.error : 'Google sign-in failed' };
+    } catch (error) {
+      return { success: false, error: error.message || 'Google sign-in failed' };
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // register: does NOT log the user in anymore. Backend sends an OTP email
   // and the caller (Register page) is responsible for showing the OTP step.
   const register = async (name, email, password, confirmPassword, role) => {
@@ -202,6 +220,7 @@ export const AuthProvider = ({ children }) => {
         loading,
         isAuthenticated,
         login,
+        loginWithGoogle,
         register,
         verifyOtp,
         resendOtp,

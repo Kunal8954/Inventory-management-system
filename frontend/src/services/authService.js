@@ -1,12 +1,23 @@
 import { api } from './api';
 
 export const authService = {
-	async login(email, password) {
+	async login(identifier, password) {
 		try {
-			const data = await api.post('/auth/login', { email, password }, { auth: false });
+			const isEmail = identifier.includes('@');
+			const body = isEmail ? { email: identifier, password } : { phone: identifier, password };
+			const data = await api.post('/auth/login', body, { auth: false });
 			return data;
 		} catch (error) {
 			return { success: false, error: error.message || 'Login failed' };
+		}
+	},
+
+	async loginWithGoogle(credential) {
+		try {
+			const data = await api.post('/auth/google', { credential }, { auth: false });
+			return data;
+		} catch (error) {
+			return { success: false, error: error.message || 'Google sign-in failed' };
 		}
 	},
 
