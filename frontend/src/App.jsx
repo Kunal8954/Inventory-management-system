@@ -21,6 +21,13 @@ import Notifications from "./pages/Notifications";
 import Settings from "./pages/Settings";
 import ForgotPassword from './pages/ForgotPassword';
 
+import ShopLayout from './components/layout/ShopLayout';
+import ShopProtectedRoute from './components/ShopProtectedRoute';
+import ShopLogin from './pages/ShopLogin';
+import ShopRegister from './pages/ShopRegister';
+import ShopBrowse from './pages/ShopBrowse';
+import ShopOrders from './pages/ShopOrders';
+
 function App() {
   return (
     <AuthProvider>
@@ -30,6 +37,22 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/shop/login" element={<ShopLogin />} />
+          <Route path="/shop/register" element={<ShopRegister />} />
+
+          {/* Shop Routes — Browse is open to guests, Orders requires a customer login */}
+          <Route element={<ShopLayout />}>
+            <Route path="/shop" element={<ShopBrowse />} />
+            <Route
+              path="/shop/orders"
+              element={
+                <ShopProtectedRoute>
+                  <ShopOrders />
+                </ShopProtectedRoute>
+              }
+            />
+          </Route>
+
           {/* Protected Routes */}
           <Route
             element={

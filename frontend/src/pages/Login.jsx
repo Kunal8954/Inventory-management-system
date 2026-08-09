@@ -61,7 +61,8 @@ export default function Login() {
     setLoading(false);
 
     if (result.success) {
-      window.location.assign('/dashboard');
+      const role = (result.user?.role || '').toLowerCase();
+      window.location.assign(role === 'customer' ? '/shop' : '/dashboard');
     } else {
       // If user doesn't exist, show helpful message
       setErrors({
@@ -205,6 +206,16 @@ export default function Login() {
             >
               Create Account
             </Link>
+          </div>
+
+          {/* Customer Shop Link */}
+          <div className="text-center mt-4 pt-4 border-t border-slate-100">
+            <p className="text-sm text-slate-500">
+              Looking to place an order instead?{' '}
+              <Link to="/shop/login" className="text-accent-600 hover:text-accent-700 font-semibold transition">
+                Go to the customer shop
+              </Link>
+            </p>
           </div>
         </div>
 

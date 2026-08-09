@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { EmptyState, Skeleton, Button, Modal, Notification } from '../components/common';
-import { fetchOrders, createOrder, updateOrderPayment } from '../services/salesService';
+import { fetchOrders, createOrder, updateOrderPayment, approveOrder } from '../services/salesService';
 import { fetchCustomers } from '../services/customerService';
 import { fetchProducts } from '../services/productService';
 import { useAuth } from '../contexts/AuthContext';
@@ -140,6 +140,19 @@ export default function Sales() {
     }
   };
 
+  const [approvingId, setApprovingId] = useState(null);
+  const handleApprove = async (orderId) => {
+    setApprovingId(orderId);
+    try {
+      await approveOrder(orderId);
+      await load();
+    } catch (err) {
+      alert(err.message || 'Failed to approve order');
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
   const createModal = (
     <Modal isOpen={isOpen} title="New Sale" onClose={handleClose} size="xl">
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -266,6 +279,7 @@ export default function Sales() {
   const totalOrders = orders.length;
   const totalRevenue = orders.reduce((s, o) => s + (parseFloat(o.total_amount || o.total || 0) || 0), 0);
   const pendingCount = orders.filter((o) => (o.order_status || o.status || '').toString().toLowerCase() === 'pending').length;
+  const pendingRequests = orders.filter((o) => (o.order_status || o.status || '').toString().toLowerCase() === 'pending');
 
   if (!orders.length) {
     return (
@@ -294,6 +308,42 @@ export default function Sales() {
           New Sale
         </Button>
       </div>
+
+      {pendingRequests.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-bold text-amber-900">
+              Pending Requests <span className="font-normal text-amber-700">({pendingRequests.length})</span>
+            </h2>
+          </div>
+          <div className="space-y-2">
+            {pendingRequests.map((o) => (
+              <div
+                key={o.order_id || o.id}
+                className="flex flex-wrap items-center justify-between gap-3 bg-white rounded-lg border border-amber-200 px-4 py-3"
+              >
+                <div>
+                  <p className="text-sm font-medium text-slate-900">
+                    Order #{o.order_id || o.id} &middot; {o.customer_name || o.customer || 'Customer'}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {(o.total_amount || o.total || 0).toLocaleString
+                      ? (o.total_amount || o.total || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' })
+                      : o.total_amount || o.total || 0}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleApprove(o.order_id || o.id)}
+                  disabled={approvingId === (o.order_id || o.id)}
+                  className="text-sm font-medium bg-accent-600 hover:bg-accent-700 disabled:bg-slate-300 text-white px-4 py-2 rounded-lg transition"
+                >
+                  {approvingId === (o.order_id || o.id) ? 'Approving...' : 'Approve'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className={`grid grid-cols-1 ${isStaff ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-4`}>
         <div className="bg-white shadow rounded-lg p-4">
