@@ -146,6 +146,9 @@ export default function Sales() {
     try {
       await approveOrder(orderId);
       await load();
+      // Approving resolves that order's notification too — tell the navbar
+      // badge to refresh right now instead of waiting for the next page load.
+      window.dispatchEvent(new Event('stockpilot:notifications-changed'));
     } catch (err) {
       alert(err.message || 'Failed to approve order');
     } finally {

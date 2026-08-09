@@ -50,17 +50,28 @@ export default function Navbar({ onOpenMobile }) {
     return () => (mounted = false)
   }, [])
 
-  // Load real unread notification count once on mount
+  // Load real unread notification count on mount, and again any time
+  // something elsewhere in the app (like approving an order) resolves one.
   useEffect(() => {
     let mounted = true
-    fetchNotifications()
-      .then((data) => {
-        if (!mounted) return
-        const unread = Array.isArray(data) ? data.filter((n) => !n.is_read).length : 0
-        setUnreadCount(unread)
-      })
-      .catch(() => {})
-    return () => (mounted = false)
+
+    const loadCount = () => {
+      fetchNotifications()
+        .then((data) => {
+          if (!mounted) return
+          const unread = Array.isArray(data) ? data.filter((n) => !n.is_read).length : 0
+          setUnreadCount(unread)
+        })
+        .catch(() => {})
+    }
+
+    loadCount()
+    window.addEventListener('stockpilot:notifications-changed', loadCount)
+
+    return () => {
+      mounted = false
+      window.removeEventListener('stockpilot:notifications-changed', loadCount)
+    }
   }, [])
 
   const handleLogout = () => {

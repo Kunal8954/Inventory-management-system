@@ -615,6 +615,14 @@ def approve_order(order_id):
         conn2.commit()
 
         try:
+            notif_cur2 = conn2.cursor()
+            notif_cur2.execute("UPDATE notifications SET is_read = 1 WHERE order_id = %s", (order_id,))
+            conn2.commit()
+            notif_cur2.close()
+        except Exception:
+            pass  # Approval already succeeded — a failed notification cleanup shouldn't undo it.
+
+        try:
             cur3 = conn2.cursor(dictionary=True)
             cur3.execute("SELECT email FROM customers WHERE customer_id = %s", (order['customer_id'],))
             customer = cur3.fetchone()
@@ -1437,8 +1445,8 @@ def create_my_order():
         try:
             notif_cur = conn.cursor()
             notif_cur.execute(
-                "INSERT INTO notifications (message, link) VALUES (%s, %s)",
-                (f"New order request #{order_id} \u2014 {total_amount}", "/sales")
+                "INSERT INTO notifications (message, link, order_id) VALUES (%s, %s, %s)",
+                (f"New order request #{order_id} \u2014 {total_amount}", "/sales", order_id)
             )
             conn.commit()
             notif_cur.close()
