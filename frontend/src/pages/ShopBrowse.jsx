@@ -181,7 +181,7 @@ export default function ShopBrowse() {
           <img
             src={product.image_url}
             alt={product.product_name || product.name}
-            className="w-full h-32 object-cover rounded-lg mb-3"
+            className="w-full h-32 object-contain bg-slate-50 rounded-lg mb-3"
           />
         ) : (
           <div className="w-full h-32 rounded-lg bg-slate-100 flex items-center justify-center mb-3">
