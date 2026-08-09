@@ -1056,6 +1056,50 @@ def get_customer_id_for_user(user_id):
     return row[0] if row else None
 
 
+@app.route('/api/shop/profile', methods=['GET'])
+@require_permission('shop.order')
+def get_my_profile():
+    customer_id = get_customer_id_for_user(g.user_id)
+    if not customer_id:
+        return jsonify({"error": "No linked customer record for this account"}), 400
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute(
+        "SELECT customer_id, customer_name, email, phone, address, city, state, country, postal_code FROM customers WHERE customer_id = %s",
+        (customer_id,)
+    )
+    data = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not data:
+        return jsonify({"error": "Profile not found"}), 404
+    return jsonify(data)
+
+
+@app.route('/api/shop/profile', methods=['PUT'])
+@require_permission('shop.order')
+def update_my_profile():
+    customer_id = get_customer_id_for_user(g.user_id)
+    if not customer_id:
+        return jsonify({"error": "No linked customer record for this account"}), 400
+
+    data = request.json or {}
+    err = require_fields(data, ['customer_name'])
+    if err:
+        return err
+
+    result = execute_transaction([
+        ("""UPDATE customers SET customer_name = %s, phone = %s, address = %s, city = %s, state = %s, postal_code = %s
+            WHERE customer_id = %s""",
+         (data['customer_name'], data.get('phone', ''), data.get('address', ''),
+          data.get('city', ''), data.get('state', ''), data.get('postal_code', ''), customer_id))
+    ], user_id=g.user_id)
+    if result['success']:
+        return jsonify({"message": "Profile updated"})
+    return jsonify({"error": result['error']}), 400
+
+
 @app.route('/api/shop/orders', methods=['GET'])
 @require_permission('shop.order')
 def get_my_orders():

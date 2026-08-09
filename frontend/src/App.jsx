@@ -27,6 +27,7 @@ import ShopLogin from './pages/ShopLogin';
 import ShopRegister from './pages/ShopRegister';
 import ShopBrowse from './pages/ShopBrowse';
 import ShopOrders from './pages/ShopOrders';
+import ShopProfile from './pages/ShopProfile';
 
 function App() {
   return (
@@ -48,6 +49,14 @@ function App() {
               element={
                 <ShopProtectedRoute>
                   <ShopOrders />
+                </ShopProtectedRoute>
+              }
+            />
+            <Route
+              path="/shop/profile"
+              element={
+                <ShopProtectedRoute>
+                  <ShopProfile />
                 </ShopProtectedRoute>
               }
             />

@@ -32,4 +32,20 @@ export const cancelOrder = async (orderId) => {
   }
 };
 
-export default { registerCustomer, fetchMyOrders, placeOrder, cancelOrder };
+export const fetchMyProfile = async () => {
+  try {
+    return await api.get('/shop/profile');
+  } catch (error) {
+    throw new Error(error.message || 'Failed to fetch your profile');
+  }
+};
+
+export const updateMyProfile = async (profile) => {
+  try {
+    return await api.put('/shop/profile', profile);
+  } catch (error) {
+    throw new Error(error.message || 'Failed to update your profile');
+  }
+};
+
+export default { registerCustomer, fetchMyOrders, placeOrder, cancelOrder, fetchMyProfile, updateMyProfile };

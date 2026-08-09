@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { FiShoppingBag, FiClipboard, FiLogOut, FiLogIn } from 'react-icons/fi';
+import { FiShoppingBag, FiClipboard, FiUser, FiLogOut, FiLogIn } from 'react-icons/fi';
 import { useAuth } from '../../contexts/AuthContext';
 
 export default function ShopLayout() {
@@ -39,6 +39,7 @@ export default function ShopLayout() {
           <nav className="hidden sm:flex items-center gap-1">
             {navLink('/shop', 'Browse', FiShoppingBag)}
             {navLink('/shop/orders', 'My Orders', FiClipboard)}
+            {isAuthenticated && navLink('/shop/profile', 'My Profile', FiUser)}
           </nav>
 
           <div className="flex items-center gap-3">
@@ -68,6 +69,7 @@ export default function ShopLayout() {
         <nav className="sm:hidden flex items-center gap-1 px-4 pb-3">
           {navLink('/shop', 'Browse', FiShoppingBag)}
           {navLink('/shop/orders', 'My Orders', FiClipboard)}
+          {isAuthenticated && navLink('/shop/profile', 'My Profile', FiUser)}
         </nav>
       </header>
 
