@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { FaSearch, FaBell, FaBars, FaChevronDown, FaUserCircle, FaCog, FaSignOutAlt, FaBox, FaTruck, FaUserFriends } from 'react-icons/fa'
+import { FaSearch, FaBell, FaBars, FaChevronDown, FaUserCircle, FaCog, FaSignOutAlt, FaBox, FaTruck, FaUserFriends, FaStore } from 'react-icons/fa'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { fetchProducts } from '../../services/productService'
@@ -201,6 +201,18 @@ export default function Navbar({ onOpenMobile }) {
 
         {/* Right actions */}
         <div className="flex items-center gap-2 sm:gap-3 ml-auto">
+          {/* View Shop — quick jump to the customer-facing site, opens in a new tab */}
+          <a
+            href="/shop"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
+            title="Open the customer shop in a new tab"
+          >
+            <FaStore className="text-sm" />
+            View Shop
+          </a>
+
           {/* Notifications */}
           <button
             onClick={() => navigate('/notifications')}
