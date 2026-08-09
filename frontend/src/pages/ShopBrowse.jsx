@@ -178,7 +178,10 @@ export default function ShopBrowse() {
     return (
       <div key={id} className="bg-white rounded-xl border border-slate-200 shadow-soft-md p-4 flex flex-col">
         <p className="font-semibold text-slate-900">{product.product_name || product.name}</p>
-        <p className="text-xs text-slate-500 mb-2">{product.sku}</p>
+        <p className="text-xs text-slate-500 mb-1">{product.sku}</p>
+        {product.description && (
+          <p className="text-xs text-slate-500 mb-2 line-clamp-2">{product.description}</p>
+        )}
         <p className="text-lg font-bold text-slate-900 mb-1">
           {Number(product.selling_price ?? product.price ?? 0).toLocaleString('en-IN', {
             style: 'currency',

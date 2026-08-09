@@ -32,4 +32,12 @@ export const approveOrder = async (orderId) => {
   }
 };
 
-export default { fetchOrders, createOrder, updateOrderPayment, approveOrder };
+export const completeOrder = async (orderId) => {
+  try {
+    return await api.put(`/orders/${orderId}/complete`, {});
+  } catch (error) {
+    throw new Error(error.message || 'Failed to complete order');
+  }
+};
+
+export default { fetchOrders, createOrder, updateOrderPayment, approveOrder, completeOrder };

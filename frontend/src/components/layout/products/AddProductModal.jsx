@@ -10,6 +10,7 @@ const emptyForm = {
   cost_price: "",
   selling_price: "",
   stock_quantity: "0",
+  description: "",
 };
 
 export default function AddProductModal({ isOpen, onClose, categories, suppliers, onSuccess }) {
@@ -46,6 +47,7 @@ export default function AddProductModal({ isOpen, onClose, categories, suppliers
         cost_price: Number(form.cost_price) || 0,
         selling_price: Number(form.selling_price) || 0,
         stock_quantity: Number(form.stock_quantity) || 0,
+        description: form.description,
       });
       setForm(emptyForm);
       onSuccess?.();
@@ -155,6 +157,17 @@ export default function AddProductModal({ isOpen, onClose, categories, suppliers
               placeholder="0"
             />
           </div>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
+          <textarea
+            value={form.description}
+            onChange={handleChange("description")}
+            rows={3}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-accent-500 focus:outline-none"
+            placeholder="Optional — shown to customers browsing the shop"
+          />
         </div>
 
         <div className="flex justify-end gap-3 border-t pt-4">

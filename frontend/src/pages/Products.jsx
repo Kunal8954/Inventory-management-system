@@ -95,6 +95,7 @@ export default function Products() {
             status: getStockStatus(stock, reorderLevel),
             updatedAt: updatedAt ? formatDate(updatedAt) : "-",
             image: null,
+            description: product.description || "",
           };
         });
 

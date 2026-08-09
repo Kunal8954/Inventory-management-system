@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { EmptyState, Skeleton, Button, Modal, Notification } from '../components/common';
-import { fetchOrders, createOrder, updateOrderPayment, approveOrder } from '../services/salesService';
+import { fetchOrders, createOrder, updateOrderPayment, approveOrder, completeOrder } from '../services/salesService';
 import { fetchCustomers } from '../services/customerService';
 import { fetchProducts } from '../services/productService';
 import { useAuth } from '../contexts/AuthContext';
@@ -153,6 +153,19 @@ export default function Sales() {
     }
   };
 
+  const [completingId, setCompletingId] = useState(null);
+  const handleComplete = async (orderId) => {
+    setCompletingId(orderId);
+    try {
+      await completeOrder(orderId);
+      await load();
+    } catch (err) {
+      alert(err.message || 'Failed to complete order');
+    } finally {
+      setCompletingId(null);
+    }
+  };
+
   const createModal = (
     <Modal isOpen={isOpen} title="New Sale" onClose={handleClose} size="xl">
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -280,6 +293,7 @@ export default function Sales() {
   const totalRevenue = orders.reduce((s, o) => s + (parseFloat(o.total_amount || o.total || 0) || 0), 0);
   const pendingCount = orders.filter((o) => (o.order_status || o.status || '').toString().toLowerCase() === 'pending').length;
   const pendingRequests = orders.filter((o) => (o.order_status || o.status || '').toString().toLowerCase() === 'pending');
+  const processingOrders = orders.filter((o) => (o.order_status || o.status || '').toString().toLowerCase() === 'processing');
 
   if (!orders.length) {
     return (
@@ -347,6 +361,35 @@ export default function Sales() {
                   className="text-sm font-medium bg-accent-600 hover:bg-accent-700 disabled:bg-slate-300 text-white px-4 py-2 rounded-lg transition shrink-0"
                 >
                   {approvingId === (o.order_id || o.id) ? 'Approving...' : 'Approve'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {processingOrders.length > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-bold text-blue-900">
+              Processing <span className="font-normal text-blue-700">({processingOrders.length})</span>
+            </h2>
+          </div>
+          <div className="space-y-2">
+            {processingOrders.map((o) => (
+              <div
+                key={o.order_id || o.id}
+                className="flex flex-wrap items-center justify-between gap-3 bg-white rounded-lg border border-blue-200 px-4 py-3"
+              >
+                <p className="text-sm font-medium text-slate-900">
+                  Order #{o.order_id || o.id} &middot; {o.customer_name || o.customer || 'Customer'}
+                </p>
+                <button
+                  onClick={() => handleComplete(o.order_id || o.id)}
+                  disabled={completingId === (o.order_id || o.id)}
+                  className="text-sm font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white px-4 py-2 rounded-lg transition"
+                >
+                  {completingId === (o.order_id || o.id) ? 'Updating...' : 'Mark Completed'}
                 </button>
               </div>
             ))}

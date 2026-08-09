@@ -146,10 +146,10 @@ def create_product():
     if err:
         return err
     result = execute_transaction([
-        ("""INSERT INTO products (sku, product_name, category_id, supplier_id, cost_price, selling_price, stock_quantity)
-            VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+        ("""INSERT INTO products (sku, product_name, category_id, supplier_id, cost_price, selling_price, stock_quantity, description)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
          (data['sku'], data['product_name'], data['category_id'], data['supplier_id'],
-          data['cost_price'], data['selling_price'], data.get('stock_quantity', 0)))
+          data['cost_price'], data['selling_price'], data.get('stock_quantity', 0), data.get('description', '')))
     ], user_id=g.user_id)
 
     if result['success']:
@@ -478,7 +478,7 @@ def approve_order(order_id):
                 (item['product_id'], user_id, item['quantity'], f"Approved order #{order_id}")
             )
 
-        cur2.execute("UPDATE orders SET order_status = 'Completed' WHERE order_id = %s", (order_id,))
+        cur2.execute("UPDATE orders SET order_status = 'Processing' WHERE order_id = %s", (order_id,))
 
         conn2.commit()
 
@@ -492,7 +492,7 @@ def approve_order(order_id):
         except Exception:
             pass  # Approval already succeeded — a failed notification shouldn't undo it.
 
-        return jsonify({"message": "Order approved and stock updated"})
+        return jsonify({"message": "Order approved, stock updated, now processing"})
     except Exception as e:
         conn2.rollback()
         return jsonify({"error": str(e)}), 400
@@ -500,6 +500,31 @@ def approve_order(order_id):
         cur2.close()
         conn2.close()
         conn.close()
+
+
+@app.route('/api/orders/<int:order_id>/complete', methods=['PUT'])
+@require_permission('orders.create')
+def complete_order(order_id):
+    """Mark a Processing order as fully Completed (delivered/picked up).
+    Status-only change — stock was already deducted at approval time."""
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM orders WHERE order_id = %s", (order_id,))
+    order = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not order:
+        return jsonify({"error": "Order not found"}), 404
+    if order.get('order_status') != 'Processing':
+        return jsonify({"error": "Only processing orders can be marked completed"}), 400
+
+    result = execute_transaction([
+        ("UPDATE orders SET order_status = 'Completed' WHERE order_id = %s", (order_id,))
+    ], user_id=g.user_id)
+    if result['success']:
+        return jsonify({"message": "Order marked completed"})
+    return jsonify({"error": result['error']}), 400
 
 # ---------- USER MANAGEMENT (Admin only) ----------
 @app.route('/api/users', methods=['GET'])

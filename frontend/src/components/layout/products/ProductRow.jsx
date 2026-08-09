@@ -35,8 +35,13 @@ const ProductRow = ({ product }) => {
       </td>
 
       {/* Name */}
-      <td className="px-6 py-4 font-medium text-gray-800 whitespace-nowrap">
-        {displayName}
+      <td className="px-6 py-4 font-medium text-gray-800 max-w-xs">
+        <p className="whitespace-nowrap">{displayName}</p>
+        {product.description && (
+          <p className="mt-0.5 text-xs font-normal text-gray-400 truncate" title={product.description}>
+            {product.description}
+          </p>
+        )}
       </td>
 
       {/* SKU */}
