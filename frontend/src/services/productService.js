@@ -26,4 +26,35 @@ export const uploadProductImage = async (productId, file) => {
   }
 };
 
-export default { fetchProducts, createProduct, uploadProductImage };
+export const fetchProductImages = async (productId) => {
+  try {
+    return await api.get(`/products/${productId}/images`);
+  } catch (error) {
+    throw new Error(error.message || 'Failed to fetch photos');
+  }
+};
+
+export const deleteProductImage = async (productId, imageId) => {
+  try {
+    return await api.del(`/products/${productId}/images/${imageId}`);
+  } catch (error) {
+    throw new Error(error.message || 'Failed to delete photo');
+  }
+};
+
+export const setProductImagePrimary = async (productId, imageId) => {
+  try {
+    return await api.put(`/products/${productId}/images/${imageId}/primary`, {});
+  } catch (error) {
+    throw new Error(error.message || 'Failed to set primary photo');
+  }
+};
+
+export default {
+  fetchProducts,
+  createProduct,
+  uploadProductImage,
+  fetchProductImages,
+  deleteProductImage,
+  setProductImagePrimary,
+};

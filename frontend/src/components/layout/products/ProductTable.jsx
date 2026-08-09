@@ -1,7 +1,7 @@
 import ProductRow from "./ProductRow";
 import EmptyProducts from "./EmptyProducts";
 
-const ProductTable = ({ products, onImageUploaded }) => {
+const ProductTable = ({ products, onManagePhotos }) => {
   if (products.length === 0) {
     return <EmptyProducts />;
   }
@@ -62,7 +62,7 @@ const ProductTable = ({ products, onImageUploaded }) => {
               <ProductRow
                 key={product.id}
                 product={product}
-                onImageUploaded={onImageUploaded}
+                onManagePhotos={onManagePhotos}
               />
             ))}
           </tbody>

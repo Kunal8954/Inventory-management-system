@@ -13,6 +13,7 @@ import ProductFilters from "../components/layout/products/ProductFilters";
 import ProductTable from "../components/layout/products/ProductTable";
 import ProductPagination from "../components/layout/products/ProductPagination";
 import AddProductModal from "../components/layout/products/AddProductModal";
+import ManagePhotosModal from "../components/layout/products/ManagePhotosModal";
 
 const ITEMS_PER_PAGE = 10;
 
@@ -33,6 +34,7 @@ export default function Products() {
   const [status, setStatus] = useState("All");
   const [currentPage, setCurrentPage] = useState(1);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [managingProduct, setManagingProduct] = useState(null);
   const [notification, setNotification] = useState(null);
   const [reloadToken, setReloadToken] = useState(0);
 
@@ -144,10 +146,8 @@ export default function Products() {
     setTimeout(() => setNotification(null), 3000);
   };
 
-  const handleImageUploaded = () => {
-    setNotification({ type: "success", message: "Photo uploaded" });
+  const handlePhotosChanged = () => {
     setReloadToken((prev) => prev + 1);
-    setTimeout(() => setNotification(null), 3000);
   };
 
   const categoryOptions = useMemo(() => {
@@ -187,6 +187,15 @@ export default function Products() {
       categories={categoryList}
       suppliers={supplierList}
       onSuccess={handleProductCreated}
+    />
+  );
+
+  const managePhotosModal = (
+    <ManagePhotosModal
+      isOpen={!!managingProduct}
+      product={managingProduct}
+      onClose={() => setManagingProduct(null)}
+      onChanged={handlePhotosChanged}
     />
   );
 
@@ -257,6 +266,7 @@ export default function Products() {
           description="Product records will appear here once the backend has entries."
         />
         {addProductModal}
+        {managePhotosModal}
         {notificationBanner}
       </div>
     );
@@ -299,7 +309,7 @@ export default function Products() {
         categories={categoryOptions}
       />
 
-      <ProductTable products={currentProducts} onImageUploaded={handleImageUploaded} />
+      <ProductTable products={currentProducts} onManagePhotos={setManagingProduct} />
 
       <ProductPagination
         currentPage={currentPage}
@@ -308,6 +318,7 @@ export default function Products() {
       />
 
       {addProductModal}
+      {managePhotosModal}
       {notificationBanner}
 
     </div>

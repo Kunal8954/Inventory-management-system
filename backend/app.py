@@ -192,11 +192,16 @@ def upload_product_image(product_id):
     try:
         cur.execute("SET @current_user_id = %s", (g.user_id,))
         conn.start_transaction()
-        # This upload becomes the product's primary photo — unset any previous one first
-        cur.execute("UPDATE product_images SET is_primary = 0 WHERE product_id = %s", (product_id,))
+
+        # Only auto-make this primary if the product has no photos at all yet.
+        # Otherwise this is just an additional photo — primary stays whatever it was.
+        cur.execute("SELECT COUNT(*) FROM product_images WHERE product_id = %s", (product_id,))
+        has_existing = cur.fetchone()[0] > 0
+        is_primary = 0 if has_existing else 1
+
         cur.execute(
-            "INSERT INTO product_images (product_id, image_url, is_primary) VALUES (%s, %s, 1)",
-            (product_id, image_url)
+            "INSERT INTO product_images (product_id, image_url, is_primary) VALUES (%s, %s, %s)",
+            (product_id, image_url, is_primary)
         )
         conn.commit()
         return jsonify({"success": True, "image_url": image_url}), 201
@@ -206,6 +211,77 @@ def upload_product_image(product_id):
     finally:
         cur.close()
         conn.close()
+
+
+@app.route('/api/products/<int:product_id>/images', methods=['GET'])
+def get_product_images(product_id):
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute(
+        "SELECT image_id, image_url, is_primary FROM product_images WHERE product_id = %s ORDER BY is_primary DESC, image_id ASC",
+        (product_id,)
+    )
+    data = cur.fetchall()
+    cur.close()
+    conn.close()
+    return jsonify(data)
+
+
+@app.route('/api/products/<int:product_id>/images/<int:image_id>', methods=['DELETE'])
+@require_permission('products.update')
+def delete_product_image(product_id, image_id):
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM product_images WHERE image_id = %s AND product_id = %s", (image_id, product_id))
+    image = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not image:
+        return jsonify({"success": False, "error": "Image not found"}), 404
+
+    result = execute_transaction([
+        ("DELETE FROM product_images WHERE image_id = %s", (image_id,))
+    ], user_id=g.user_id)
+    if not result['success']:
+        return jsonify({"success": False, "error": result['error']}), 400
+
+    # If we just deleted the primary photo, promote whichever photo is left (if any)
+    if image.get('is_primary'):
+        conn2 = get_connection()
+        cur2 = conn2.cursor(dictionary=True)
+        cur2.execute("SELECT image_id FROM product_images WHERE product_id = %s ORDER BY image_id ASC LIMIT 1", (product_id,))
+        remaining = cur2.fetchone()
+        cur2.close()
+        conn2.close()
+        if remaining:
+            execute_transaction([
+                ("UPDATE product_images SET is_primary = 1 WHERE image_id = %s", (remaining['image_id'],))
+            ], user_id=g.user_id)
+
+    return jsonify({"success": True, "message": "Image deleted"})
+
+
+@app.route('/api/products/<int:product_id>/images/<int:image_id>/primary', methods=['PUT'])
+@require_permission('products.update')
+def set_primary_product_image(product_id, image_id):
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM product_images WHERE image_id = %s AND product_id = %s", (image_id, product_id))
+    image = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not image:
+        return jsonify({"success": False, "error": "Image not found"}), 404
+
+    result = execute_transaction([
+        ("UPDATE product_images SET is_primary = 0 WHERE product_id = %s", (product_id,)),
+        ("UPDATE product_images SET is_primary = 1 WHERE image_id = %s", (image_id,)),
+    ], user_id=g.user_id)
+    if result['success']:
+        return jsonify({"success": True, "message": "Primary photo updated"})
+    return jsonify({"success": False, "error": result['error']}), 400
 
 
 @app.route('/api/products/<int:product_id>', methods=['PUT'])
