@@ -5,7 +5,7 @@ import {
   FiCamera,
 } from "react-icons/fi";
 
-const ProductRow = ({ product, onManagePhotos }) => {
+const ProductRow = ({ product, onManagePhotos, onEdit, onDelete }) => {
   const displayName = product.name || product.productName || 'Product';
   const displayInitial = displayName.trim().charAt(0).toUpperCase() || 'P';
   const statusClasses = {
@@ -100,13 +100,16 @@ const ProductRow = ({ product, onManagePhotos }) => {
         <div className="flex items-center gap-2">
 
           <button
+            onClick={() => onManagePhotos?.(product)}
             className="rounded-lg p-2 text-blue-600 hover:bg-blue-100 transition"
             aria-label="View Product"
+            title="View / manage photos"
           >
             <FiEye size={18} />
           </button>
 
           <button
+            onClick={() => onEdit?.(product)}
             className="rounded-lg p-2 text-green-600 hover:bg-green-100 transition"
             aria-label="Edit Product"
           >
@@ -114,6 +117,7 @@ const ProductRow = ({ product, onManagePhotos }) => {
           </button>
 
           <button
+            onClick={() => onDelete?.(product)}
             className="rounded-lg p-2 text-red-600 hover:bg-red-100 transition"
             aria-label="Delete Product"
           >

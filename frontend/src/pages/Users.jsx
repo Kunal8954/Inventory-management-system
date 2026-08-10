@@ -7,6 +7,7 @@ const roleVariant = (role) => {
   const r = (role || '').toLowerCase();
   if (r === 'admin') return 'danger';
   if (r === 'manager') return 'warning';
+  if (r === 'customer') return 'info';
   return 'info';
 };
 
@@ -129,6 +130,7 @@ export default function Users() {
           <tbody>
             {users.map((u) => {
               const isSelf = String(u.user_id) === String(currentUser?.id);
+              const isCustomer = (u.role || '').toLowerCase() === 'customer';
               return (
                 <tr key={u.user_id} className="border-b last:border-b-0">
                   <td className="px-6 py-4">
@@ -141,17 +143,23 @@ export default function Users() {
                   </td>
                   <td className="px-6 py-4">{u.status || 'Active'}</td>
                   <td className="px-6 py-4">
-                    <select
-                      value={u.role || 'Staff'}
-                      onChange={(e) => handleRoleChange(u.user_id, e.target.value)}
-                      disabled={isSelf || updatingId === u.user_id}
-                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm focus:border-accent-500 focus:outline-none disabled:opacity-50"
-                      title={isSelf ? "You can't change your own role" : undefined}
-                    >
-                      <option value="Staff">Staff</option>
-                      <option value="Manager">Manager</option>
-                      <option value="Admin">Admin</option>
-                    </select>
+                    {isCustomer ? (
+                      <span className="text-xs text-slate-400" title="Customer accounts are managed on the shop side, not here">
+                        Not editable here
+                      </span>
+                    ) : (
+                      <select
+                        value={u.role || 'Staff'}
+                        onChange={(e) => handleRoleChange(u.user_id, e.target.value)}
+                        disabled={isSelf || updatingId === u.user_id}
+                        className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm focus:border-accent-500 focus:outline-none disabled:opacity-50"
+                        title={isSelf ? "You can't change your own role" : undefined}
+                      >
+                        <option value="Staff">Staff</option>
+                        <option value="Manager">Manager</option>
+                        <option value="Admin">Admin</option>
+                      </select>
+                    )}
                   </td>
                 </tr>
               );

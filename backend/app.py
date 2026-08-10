@@ -321,12 +321,15 @@ def set_primary_product_image(product_id, image_id):
 @require_permission('products.update')
 def update_product(product_id):
     data = request.json or {}
-    err = require_fields(data, ['stock_quantity', 'selling_price'])
+    err = require_fields(data, ['product_name', 'sku', 'category_id', 'supplier_id', 'cost_price', 'selling_price'])
     if err:
         return err
     result = execute_transaction([
-        ("""UPDATE products SET stock_quantity = %s, selling_price = %s WHERE product_id = %s""",
-         (data['stock_quantity'], data['selling_price'], product_id))
+        ("""UPDATE products SET product_name = %s, sku = %s, category_id = %s, supplier_id = %s,
+            cost_price = %s, selling_price = %s, description = %s
+            WHERE product_id = %s""",
+         (data['product_name'], data['sku'], data['category_id'], data['supplier_id'],
+          data['cost_price'], data['selling_price'], data.get('description', ''), product_id))
     ], user_id=g.user_id)
 
     if result['success']:
@@ -336,7 +339,22 @@ def update_product(product_id):
 @app.route('/api/products/<int:product_id>', methods=['DELETE'])
 @require_permission('products.delete')
 def delete_product(product_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM order_items WHERE product_id = %s", (product_id,))
+    has_sales = cur.fetchone()[0] > 0
+    cur.execute("SELECT COUNT(*) FROM purchase_order_items WHERE product_id = %s", (product_id,))
+    has_purchases = cur.fetchone()[0] > 0
+    cur.execute("SELECT COUNT(*) FROM inventory_transactions WHERE product_id = %s", (product_id,))
+    has_stock_history = cur.fetchone()[0] > 0
+    cur.close()
+    conn.close()
+
+    if has_sales or has_purchases or has_stock_history:
+        return jsonify({"error": "Can't delete this product \u2014 it has order or stock history tied to it."}), 400
+
     result = execute_transaction([
+        ("DELETE FROM product_images WHERE product_id = %s", (product_id,)),
         ("DELETE FROM products WHERE product_id = %s", (product_id,))
     ], user_id=g.user_id)
 
@@ -895,20 +913,36 @@ def update_user_role(user_id):
         return jsonify({"error": "Invalid role"}), 400
 
     conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT role_id FROM roles WHERE role_name = %s LIMIT 1", (new_role,))
-    row = cur.fetchone()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT role FROM users WHERE user_id = %s", (user_id,))
+    target = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not target:
+        return jsonify({"error": "User not found"}), 404
+    if target['role'] == 'Customer':
+        # Customer accounts are tied to a customers record (orders, delivery info) and
+        # were never vetted as employees — they can't be promoted into a staff role here.
+        return jsonify({"error": "Customer accounts can't be changed to a staff role"}), 400
+
+    conn2 = get_connection()
+    cur2 = conn2.cursor()
+    cur2.execute("SELECT role_id FROM roles WHERE role_name = %s LIMIT 1", (new_role,))
+    row = cur2.fetchone()
+    cur2.close()
+    conn2.close()
     if not row:
-        cur.close()
-        conn.close()
         return jsonify({"error": "Role not found"}), 400
     new_role_id = row[0]
 
-    cur.execute("UPDATE users SET role = %s, role_id = %s WHERE user_id = %s", (new_role, new_role_id, user_id))
-    conn.commit()
-    cur.close()
-    conn.close()
-    return jsonify({"message": "Role updated"})
+    result = execute_transaction([
+        ("UPDATE users SET role = %s, role_id = %s WHERE user_id = %s", (new_role, new_role_id, user_id))
+    ], user_id=g.user_id)
+
+    if result['success']:
+        return jsonify({"message": "Role updated"})
+    return jsonify({"error": result['error']}), 400
 
 # ---------- INVENTORY TRANSACTIONS (Stock In/Out log) ----------
 @app.route('/api/inventory/transactions', methods=['GET'])

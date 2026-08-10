@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import { FiPlus } from "react-icons/fi";
 
 import { EmptyState, Skeleton, Button, Notification } from "../components/common";
-import { fetchProducts } from "../services/productService";
+import { fetchProducts, deleteProduct } from "../services/productService";
 import { fetchCategories } from "../services/categoryService";
 import { fetchSuppliers } from "../services/supplierService";
 import { formatDate, getStockStatus } from "../utils/formatters";
@@ -14,6 +14,7 @@ import ProductTable from "../components/layout/products/ProductTable";
 import ProductPagination from "../components/layout/products/ProductPagination";
 import AddProductModal from "../components/layout/products/AddProductModal";
 import ManagePhotosModal from "../components/layout/products/ManagePhotosModal";
+import EditProductModal from "../components/layout/products/EditProductModal";
 
 const ITEMS_PER_PAGE = 10;
 
@@ -35,6 +36,7 @@ export default function Products() {
   const [currentPage, setCurrentPage] = useState(1);
   const [showAddModal, setShowAddModal] = useState(false);
   const [managingProduct, setManagingProduct] = useState(null);
+  const [editingProduct, setEditingProduct] = useState(null);
   const [notification, setNotification] = useState(null);
   const [reloadToken, setReloadToken] = useState(0);
 
@@ -98,6 +100,9 @@ export default function Products() {
             updatedAt: updatedAt ? formatDate(updatedAt) : "-",
             image: product.image_url || null,
             description: product.description || "",
+            categoryId: product.category_id ?? "",
+            supplierId: product.supplier_id ?? "",
+            costPrice: Number(product.cost_price ?? 0),
           };
         });
 
@@ -150,6 +155,25 @@ export default function Products() {
     setReloadToken((prev) => prev + 1);
   };
 
+  const handleProductUpdated = () => {
+    setNotification({ type: "success", message: "Product updated successfully" });
+    setReloadToken((prev) => prev + 1);
+    setTimeout(() => setNotification(null), 3000);
+  };
+
+  const handleDeleteProduct = async (product) => {
+    const confirmed = window.confirm(`Delete "${product.name}"? This can't be undone.`);
+    if (!confirmed) return;
+    try {
+      await deleteProduct(product.id);
+      setNotification({ type: "success", message: "Product deleted" });
+      setReloadToken((prev) => prev + 1);
+    } catch (err) {
+      setNotification({ type: "error", message: err.message || "Failed to delete product" });
+    }
+    setTimeout(() => setNotification(null), 3000);
+  };
+
   const categoryOptions = useMemo(() => {
     return [...new Set(products.map((product) => product.category).filter(Boolean))].sort();
   }, [products]);
@@ -187,6 +211,17 @@ export default function Products() {
       categories={categoryList}
       suppliers={supplierList}
       onSuccess={handleProductCreated}
+    />
+  );
+
+  const editProductModal = (
+    <EditProductModal
+      isOpen={!!editingProduct}
+      product={editingProduct}
+      onClose={() => setEditingProduct(null)}
+      categories={categoryList}
+      suppliers={supplierList}
+      onSuccess={handleProductUpdated}
     />
   );
 
@@ -267,6 +302,7 @@ export default function Products() {
         />
         {addProductModal}
         {managePhotosModal}
+        {editProductModal}
         {notificationBanner}
       </div>
     );
@@ -309,7 +345,12 @@ export default function Products() {
         categories={categoryOptions}
       />
 
-      <ProductTable products={currentProducts} onManagePhotos={setManagingProduct} />
+      <ProductTable
+        products={currentProducts}
+        onManagePhotos={setManagingProduct}
+        onEdit={setEditingProduct}
+        onDelete={handleDeleteProduct}
+      />
 
       <ProductPagination
         currentPage={currentPage}
@@ -319,6 +360,7 @@ export default function Products() {
 
       {addProductModal}
       {managePhotosModal}
+      {editProductModal}
       {notificationBanner}
 
     </div>

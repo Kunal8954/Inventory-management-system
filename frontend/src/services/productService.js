@@ -16,6 +16,22 @@ export const createProduct = async (payload) => {
   }
 };
 
+export const updateProduct = async (productId, payload) => {
+  try {
+    return await api.put(`/products/${productId}`, payload);
+  } catch (error) {
+    throw new Error(error.message || 'Failed to update product');
+  }
+};
+
+export const deleteProduct = async (productId) => {
+  try {
+    return await api.del(`/products/${productId}`);
+  } catch (error) {
+    throw new Error(error.message || 'Failed to delete product');
+  }
+};
+
 export const uploadProductImage = async (productId, file) => {
   try {
     const formData = new FormData();
@@ -53,6 +69,8 @@ export const setProductImagePrimary = async (productId, imageId) => {
 export default {
   fetchProducts,
   createProduct,
+  updateProduct,
+  deleteProduct,
   uploadProductImage,
   fetchProductImages,
   deleteProductImage,

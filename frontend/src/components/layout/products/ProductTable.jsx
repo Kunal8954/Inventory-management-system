@@ -1,7 +1,7 @@
 import ProductRow from "./ProductRow";
 import EmptyProducts from "./EmptyProducts";
 
-const ProductTable = ({ products, onManagePhotos }) => {
+const ProductTable = ({ products, onManagePhotos, onEdit, onDelete }) => {
   if (products.length === 0) {
     return <EmptyProducts />;
   }
@@ -63,6 +63,8 @@ const ProductTable = ({ products, onManagePhotos }) => {
                 key={product.id}
                 product={product}
                 onManagePhotos={onManagePhotos}
+                onEdit={onEdit}
+                onDelete={onDelete}
               />
             ))}
           </tbody>
