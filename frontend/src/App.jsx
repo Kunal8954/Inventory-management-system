@@ -41,6 +41,7 @@ function App() {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/shop/login" element={<ShopLogin />} />
           <Route path="/shop/register" element={<ShopRegister />} />
+          <Route path="/" element={<Navigate to="/shop" replace />} />
 
           {/* Shop Routes — Browse is open to guests, Orders requires a customer login */}
           <Route element={<ShopLayout />}>
@@ -72,7 +73,6 @@ function App() {
             }
           >
             <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/inventory" element={<Inventory />} />
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/products" element={<Products />} />

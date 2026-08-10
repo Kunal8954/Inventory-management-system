@@ -98,6 +98,13 @@ export default function ShopLogin() {
           <p className="text-slate-600">Sign in to order</p>
         </div>
 
+        <Link
+          to="/shop"
+          className="flex items-center justify-center gap-2 w-full mb-6 py-3 rounded-xl border border-slate-200 text-slate-700 font-medium hover:bg-slate-50 transition"
+        >
+          Just want to look around? Browse without an account →
+        </Link>
+
         <div className="bg-white rounded-xl shadow-soft-lg p-8 border border-slate-200">
           <h2 className="text-xl font-semibold text-slate-900 mb-6">Welcome Back</h2>
 
