@@ -18,6 +18,9 @@ import cloudinary
 import cloudinary.uploader
 from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_auth_requests
+import razorpay
+import hmac
+import hashlib
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY")
@@ -38,6 +41,10 @@ cloudinary.config(
 )
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
+razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
 # ----------------------
 # Token helpers (moved up so require_permission can use them)
@@ -1698,6 +1705,89 @@ def create_my_order():
     finally:
         cur.close()
         conn.close()
+
+
+@app.route('/api/shop/orders/<int:order_id>/create-payment', methods=['POST'])
+@require_permission('shop.order')
+def create_order_payment(order_id):
+    """Step 1 of real payment: ask Razorpay for a payment session for this order's
+    amount. Returns only the public key_id and session id — never the secret."""
+    customer_id = get_customer_id_for_user(g.user_id)
+    if not customer_id:
+        return jsonify({"error": "No linked customer record for this account"}), 400
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM orders WHERE order_id = %s AND customer_id = %s", (order_id, customer_id))
+    order = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not order:
+        return jsonify({"error": "Order not found"}), 404
+    if order.get('payment_status') == 'Paid':
+        return jsonify({"error": "This order is already paid"}), 400
+
+    amount_paise = int(round(float(order['total_amount']) * 100))
+    try:
+        razorpay_order = razorpay_client.order.create({
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": f"order_{order_id}",
+        })
+    except Exception as e:
+        return jsonify({"error": f"Could not start payment: {str(e)}"}), 500
+
+    return jsonify({
+        "razorpay_order_id": razorpay_order["id"],
+        "amount": amount_paise,
+        "currency": "INR",
+        "key_id": RAZORPAY_KEY_ID,
+    })
+
+
+@app.route('/api/shop/orders/<int:order_id>/verify-payment', methods=['POST'])
+@require_permission('shop.order')
+def verify_order_payment(order_id):
+    """Step 2: the frontend never gets to just say 'payment succeeded'. We
+    independently recompute the signature Razorpay would have produced and
+    only mark the order paid if it matches exactly."""
+    customer_id = get_customer_id_for_user(g.user_id)
+    if not customer_id:
+        return jsonify({"error": "No linked customer record for this account"}), 400
+
+    data = request.json or {}
+    err = require_fields(data, ['razorpay_order_id', 'razorpay_payment_id', 'razorpay_signature'])
+    if err:
+        return err
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM orders WHERE order_id = %s AND customer_id = %s", (order_id, customer_id))
+    order = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not order:
+        return jsonify({"error": "Order not found"}), 404
+
+    expected_signature = hmac.new(
+        RAZORPAY_KEY_SECRET.encode(),
+        f"{data['razorpay_order_id']}|{data['razorpay_payment_id']}".encode(),
+        hashlib.sha256
+    ).hexdigest()
+
+    if not hmac.compare_digest(expected_signature, data['razorpay_signature']):
+        return jsonify({"error": "Payment verification failed"}), 400
+
+    # Signature is genuine — mark paid. This never touches order_status or stock;
+    # staff still separately approves the order, same as always.
+    result = execute_transaction([
+        ("UPDATE orders SET payment_status = 'Paid' WHERE order_id = %s", (order_id,))
+    ], user_id=g.user_id)
+    if result['success']:
+        return jsonify({"message": "Payment verified"})
+    return jsonify({"error": result['error']}), 400
 
 
 # ---------- NOTIFICATIONS (shared feed for staff) ----------

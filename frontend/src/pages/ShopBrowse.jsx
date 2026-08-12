@@ -4,12 +4,13 @@ import { FiShoppingCart, FiPlus, FiMinus, FiTrash2, FiLoader, FiCheck, FiSearch 
 import { fetchProducts } from '../services/productService';
 import { fetchCategories } from '../services/categoryService';
 import { placeOrder } from '../services/shopService';
+import { payForOrder } from '../utils/razorpayPayment';
 import { EmptyState, Skeleton, Notification } from '../components/common';
 import ProductDetailModal from '../components/shop/ProductDetailModal';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function ShopBrowse() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
 
   const [products, setProducts] = useState([]);
@@ -113,6 +114,23 @@ export default function ShopBrowse() {
   const cartTotal = cart.reduce((sum, line) => sum + line.unit_price * line.quantity, 0);
   const cartCount = cart.reduce((sum, line) => sum + line.quantity, 0);
 
+  const startRazorpayPayment = async (orderId) => {
+    await payForOrder(orderId, user, {
+      onSuccess: () => {
+        setNotification({ type: 'success', message: 'Payment received! Your order is confirmed.' });
+        setTimeout(() => setNotification(null), 5000);
+      },
+      onDismiss: () => {
+        setNotification({ type: 'success', message: 'Order request submitted \u2014 you can pay anytime from My Orders.' });
+        setTimeout(() => setNotification(null), 5000);
+      },
+      onError: (message) => {
+        setNotification({ type: 'error', message: `${message} Your order was still placed \u2014 pay from My Orders.` });
+        setTimeout(() => setNotification(null), 5000);
+      },
+    });
+  };
+
   const handleCheckout = async () => {
     if (cart.length === 0) return;
 
@@ -123,7 +141,7 @@ export default function ShopBrowse() {
 
     setPlacing(true);
     try {
-      await placeOrder(
+      const result = await placeOrder(
         cart.map((line) => ({
           product_id: line.product_id,
           quantity: line.quantity,
@@ -141,8 +159,15 @@ export default function ShopBrowse() {
       setDeliveryCity('');
       setDeliveryPhone('');
       setJustOrdered(true);
-      setNotification({ type: 'success', message: 'Order request submitted! Track it under My Orders.' });
-      setTimeout(() => setNotification(null), 4000);
+
+      if (paymentMethod === 'Online' && result?.order_id) {
+        setNotification({ type: 'success', message: 'Order submitted — opening payment...' });
+        setTimeout(() => setNotification(null), 3000);
+        await startRazorpayPayment(result.order_id);
+      } else {
+        setNotification({ type: 'success', message: 'Order request submitted! Track it under My Orders.' });
+        setTimeout(() => setNotification(null), 4000);
+      }
     } catch (err) {
       setNotification({ type: 'error', message: err.message || 'Failed to place order' });
       setTimeout(() => setNotification(null), 4000);

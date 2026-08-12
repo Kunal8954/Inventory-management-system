@@ -32,6 +32,22 @@ export const cancelOrder = async (orderId) => {
   }
 };
 
+export const createOrderPayment = async (orderId) => {
+  try {
+    return await api.post(`/shop/orders/${orderId}/create-payment`, {});
+  } catch (error) {
+    throw new Error(error.message || 'Failed to start payment');
+  }
+};
+
+export const verifyOrderPayment = async (orderId, paymentData) => {
+  try {
+    return await api.post(`/shop/orders/${orderId}/verify-payment`, paymentData);
+  } catch (error) {
+    throw new Error(error.message || 'Payment verification failed');
+  }
+};
+
 export const fetchMyProfile = async () => {
   try {
     return await api.get('/shop/profile');
@@ -48,4 +64,4 @@ export const updateMyProfile = async (profile) => {
   }
 };
 
-export default { registerCustomer, fetchMyOrders, placeOrder, cancelOrder, fetchMyProfile, updateMyProfile };
+export default { registerCustomer, fetchMyOrders, placeOrder, cancelOrder, createOrderPayment, verifyOrderPayment, fetchMyProfile, updateMyProfile };

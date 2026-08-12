@@ -28,3 +28,4 @@ resend
 pytest
 cloudinary
 google-auth
+razorpay

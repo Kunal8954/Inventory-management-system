@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { EmptyState, Skeleton, Badge } from '../components/common';
 import { fetchMyOrders, cancelOrder } from '../services/shopService';
+import { payForOrder } from '../utils/razorpayPayment';
+import { useAuth } from '../contexts/AuthContext';
 
 const statusVariant = (status) => {
   const s = (status || '').toLowerCase();
@@ -11,10 +13,12 @@ const statusVariant = (status) => {
 };
 
 export default function ShopOrders() {
+  const { user } = useAuth();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [cancellingId, setCancellingId] = useState(null);
+  const [payingId, setPayingId] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -60,6 +64,23 @@ export default function ShopOrders() {
     }
   };
 
+  const handlePayNow = async (orderId) => {
+    setPayingId(orderId);
+    await payForOrder(orderId, user, {
+      onSuccess: async () => {
+        await load();
+        setPayingId(null);
+      },
+      onDismiss: () => {
+        setPayingId(null);
+      },
+      onError: (message) => {
+        alert(message);
+        setPayingId(null);
+      },
+    });
+  };
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -92,56 +113,72 @@ export default function ShopOrders() {
       <h1 className="text-3xl font-bold text-slate-900">My Orders</h1>
 
       <div className="space-y-4">
-        {orders.map((order) => (
-          <div key={order.order_id} className="bg-white rounded-xl border border-slate-200 shadow-soft-md p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
-              <div>
-                <p className="font-semibold text-slate-900">Order #{order.order_id}</p>
-                <p className="text-xs text-slate-500">
-                  {order.order_date ? new Date(order.order_date).toLocaleString() : '-'}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge label={order.order_status || 'Pending'} variant={statusVariant(order.order_status)} />
-                <Badge label={order.payment_status || 'Pending'} variant={order.payment_status === 'Paid' ? 'success' : 'warning'} />
-              </div>
-            </div>
+        {orders.map((order) => {
+          const canPay =
+            order.payment_method === 'Online' &&
+            order.payment_status !== 'Paid' &&
+            (order.order_status || '').toLowerCase() !== 'cancelled';
 
-            <div className="border-t border-slate-100 pt-3 space-y-1 mb-3">
-              {(order.items || []).map((item, i) => (
-                <div key={i} className="flex items-center justify-between text-sm">
-                  <span className="text-slate-700">
-                    {item.product_name} <span className="text-slate-400">&times; {item.quantity}</span>
-                  </span>
-                  <span className="text-slate-600">
-                    {Number(item.subtotal || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' })}
-                  </span>
+          return (
+            <div key={order.order_id} className="bg-white rounded-xl border border-slate-200 shadow-soft-md p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+                <div>
+                  <p className="font-semibold text-slate-900">Order #{order.order_id}</p>
+                  <p className="text-xs text-slate-500">
+                    {order.order_date ? new Date(order.order_date).toLocaleString() : '-'}
+                  </p>
                 </div>
-              ))}
-            </div>
+                <div className="flex items-center gap-2">
+                  <Badge label={order.order_status || 'Pending'} variant={statusVariant(order.order_status)} />
+                  <Badge label={order.payment_status || 'Pending'} variant={order.payment_status === 'Paid' ? 'success' : 'warning'} />
+                </div>
+              </div>
 
-            <div className="flex items-center justify-between border-t border-slate-100 pt-3">
-              <div className="text-xs text-slate-500">
-                {order.payment_method && <span className="mr-3">{order.payment_method}</span>}
-                {order.delivery_city && <span>Deliver to {order.delivery_city}</span>}
+              <div className="border-t border-slate-100 pt-3 space-y-1 mb-3">
+                {(order.items || []).map((item, i) => (
+                  <div key={i} className="flex items-center justify-between text-sm">
+                    <span className="text-slate-700">
+                      {item.product_name} <span className="text-slate-400">&times; {item.quantity}</span>
+                    </span>
+                    <span className="text-slate-600">
+                      {Number(item.subtotal || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' })}
+                    </span>
+                  </div>
+                ))}
               </div>
-              <div className="flex items-center gap-3">
-                <span className="font-bold text-slate-900">
-                  {Number(order.total_amount || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' })}
-                </span>
-                {(order.order_status || '').toLowerCase() === 'pending' && (
-                  <button
-                    onClick={() => handleCancel(order.order_id)}
-                    disabled={cancellingId === order.order_id}
-                    className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50 underline"
-                  >
-                    {cancellingId === order.order_id ? 'Cancelling...' : 'Cancel'}
-                  </button>
-                )}
+
+              <div className="flex items-center justify-between border-t border-slate-100 pt-3">
+                <div className="text-xs text-slate-500">
+                  {order.payment_method && <span className="mr-3">{order.payment_method}</span>}
+                  {order.delivery_city && <span>Deliver to {order.delivery_city}</span>}
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="font-bold text-slate-900">
+                    {Number(order.total_amount || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' })}
+                  </span>
+                  {canPay && (
+                    <button
+                      onClick={() => handlePayNow(order.order_id)}
+                      disabled={payingId === order.order_id}
+                      className="text-xs font-semibold text-white bg-accent-600 hover:bg-accent-700 disabled:opacity-50 px-3 py-1.5 rounded-lg transition"
+                    >
+                      {payingId === order.order_id ? 'Opening...' : 'Pay Now'}
+                    </button>
+                  )}
+                  {(order.order_status || '').toLowerCase() === 'pending' && (
+                    <button
+                      onClick={() => handleCancel(order.order_id)}
+                      disabled={cancellingId === order.order_id}
+                      className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50 underline"
+                    >
+                      {cancellingId === order.order_id ? 'Cancelling...' : 'Cancel'}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
