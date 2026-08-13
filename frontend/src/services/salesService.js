@@ -32,11 +32,27 @@ export const approveOrder = async (orderId) => {
   }
 };
 
-export const refundOrder = async (orderId) => {
+export const fetchRefundRequests = async () => {
   try {
-    return await api.post(`/orders/${orderId}/refund`, {});
+    return await api.get('/refund-requests');
   } catch (error) {
-    throw new Error(error.message || 'Failed to process refund');
+    throw new Error(error.message || 'Failed to fetch refund requests');
+  }
+};
+
+export const approveRefundRequest = async (requestId) => {
+  try {
+    return await api.put(`/refund-requests/${requestId}/approve`, {});
+  } catch (error) {
+    throw new Error(error.message || 'Failed to approve refund');
+  }
+};
+
+export const rejectRefundRequest = async (requestId, staffNote) => {
+  try {
+    return await api.put(`/refund-requests/${requestId}/reject`, { staff_note: staffNote });
+  } catch (error) {
+    throw new Error(error.message || 'Failed to reject refund request');
   }
 };
 
@@ -48,4 +64,4 @@ export const completeOrder = async (orderId) => {
   }
 };
 
-export default { fetchOrders, createOrder, updateOrderPayment, approveOrder, completeOrder, refundOrder };
+export default { fetchOrders, createOrder, updateOrderPayment, approveOrder, completeOrder, fetchRefundRequests, approveRefundRequest, rejectRefundRequest };

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { EmptyState, Skeleton, Button, Modal, Notification } from '../components/common';
-import { fetchOrders, createOrder, updateOrderPayment, approveOrder, completeOrder, refundOrder } from '../services/salesService';
+import { fetchOrders, createOrder, updateOrderPayment, approveOrder, completeOrder, fetchRefundRequests, approveRefundRequest, rejectRefundRequest } from '../services/salesService';
 import { fetchCustomers } from '../services/customerService';
 import { fetchProducts } from '../services/productService';
 import { useAuth } from '../contexts/AuthContext';
@@ -12,6 +12,7 @@ export default function Sales() {
   const isStaff = user?.role === 'staff';
   const canRefund = user?.role === 'admin' || user?.role === 'manager';
   const [orders, setOrders] = useState([]);
+  const [refundRequests, setRefundRequests] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -28,14 +29,16 @@ export default function Sales() {
     setLoading(true);
     setError(null);
     try {
-      const [orderData, customerData, productData] = await Promise.all([
+      const [orderData, customerData, productData, refundData] = await Promise.all([
         fetchOrders(),
         fetchCustomers(),
         fetchProducts(),
+        fetchRefundRequests().catch(() => []),
       ]);
       setOrders(Array.isArray(orderData) ? orderData : []);
       setCustomers(Array.isArray(customerData) ? customerData : []);
       setProducts(Array.isArray(productData) ? productData : []);
+      setRefundRequests(Array.isArray(refundData) ? refundData : []);
     } catch (err) {
       setError(err.message || 'Failed to load orders');
     } finally {
@@ -47,15 +50,17 @@ export default function Sales() {
     let mounted = true;
     (async () => {
       try {
-        const [orderData, customerData, productData] = await Promise.all([
+        const [orderData, customerData, productData, refundData] = await Promise.all([
           fetchOrders(),
           fetchCustomers(),
           fetchProducts(),
+          fetchRefundRequests().catch(() => []),
         ]);
         if (!mounted) return;
         setOrders(Array.isArray(orderData) ? orderData : []);
         setCustomers(Array.isArray(customerData) ? customerData : []);
         setProducts(Array.isArray(productData) ? productData : []);
+        setRefundRequests(Array.isArray(refundData) ? refundData : []);
       } catch (err) {
         if (!mounted) return;
         setError(err.message || 'Failed to load orders');
@@ -141,20 +146,33 @@ export default function Sales() {
     }
   };
 
-  const [refundingId, setRefundingId] = useState(null);
-  const handleRefund = async (orderId) => {
+  const [resolvingRequestId, setResolvingRequestId] = useState(null);
+  const handleApproveRefund = async (requestId) => {
     const confirmed = window.confirm(
-      `Refund order #${orderId}? This sends the money back through Razorpay and can't be undone.`
+      `Approve this refund? This sends the money back through Razorpay and can't be undone.`
     );
     if (!confirmed) return;
-    setRefundingId(orderId);
+    setResolvingRequestId(requestId);
     try {
-      await refundOrder(orderId);
+      await approveRefundRequest(requestId);
       await load();
     } catch (err) {
-      alert(err.message || 'Failed to process refund');
+      alert(err.message || 'Failed to approve refund');
     } finally {
-      setRefundingId(null);
+      setResolvingRequestId(null);
+    }
+  };
+
+  const handleRejectRefund = async (requestId) => {
+    const note = window.prompt('Optional note for the customer on why this was declined:') || '';
+    setResolvingRequestId(requestId);
+    try {
+      await rejectRefundRequest(requestId, note);
+      await load();
+    } catch (err) {
+      alert(err.message || 'Failed to reject refund request');
+    } finally {
+      setResolvingRequestId(null);
     }
   };
 
@@ -418,6 +436,55 @@ export default function Sales() {
         </div>
       )}
 
+      {canRefund && refundRequests.filter((r) => r.status === 'Pending').length > 0 && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-bold text-red-900">
+              Refund Requests{' '}
+              <span className="font-normal text-red-700">
+                ({refundRequests.filter((r) => r.status === 'Pending').length})
+              </span>
+            </h2>
+          </div>
+          <div className="space-y-2">
+            {refundRequests
+              .filter((r) => r.status === 'Pending')
+              .map((r) => (
+                <div
+                  key={r.request_id}
+                  className="flex flex-wrap items-start justify-between gap-3 bg-white rounded-lg border border-red-200 px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-900">
+                      Order #{r.order_id} &middot; {r.customer_name}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {Number(r.total_amount || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' })}
+                    </p>
+                    <p className="text-xs text-slate-600 mt-1 italic">"{r.reason}"</p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => handleApproveRefund(r.request_id)}
+                      disabled={resolvingRequestId === r.request_id}
+                      className="text-sm font-medium bg-red-600 hover:bg-red-700 disabled:bg-slate-300 text-white px-3 py-1.5 rounded-lg transition"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => handleRejectRefund(r.request_id)}
+                      disabled={resolvingRequestId === r.request_id}
+                      className="text-sm font-medium bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-50 text-slate-700 px-3 py-1.5 rounded-lg transition"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
       <div className={`grid grid-cols-1 ${isStaff ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-4`}>
         <div className="bg-white shadow rounded-lg p-4">
           <div className="text-sm text-slate-500">Total Orders</div>
@@ -466,15 +533,7 @@ export default function Sales() {
                           Mark Paid
                         </button>
                       )}
-                      {paymentStatus === 'Paid' && canRefund && (
-                        <button
-                          onClick={() => handleRefund(o.order_id || o.id)}
-                          disabled={refundingId === (o.order_id || o.id)}
-                          className="text-xs text-red-600 hover:text-red-700 font-medium underline disabled:opacity-50"
-                        >
-                          {refundingId === (o.order_id || o.id) ? 'Refunding...' : 'Refund'}
-                        </button>
-                      )}
+
                     </div>
                   </td>
                   <td className="px-6 py-4">{o.order_status || o.status || '-'}</td>

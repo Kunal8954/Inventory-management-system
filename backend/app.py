@@ -1604,6 +1604,12 @@ def get_my_orders():
         """, (order['order_id'],))
         order['items'] = cur.fetchall()
 
+        cur.execute("""
+            SELECT status, reason, staff_note FROM refund_requests
+            WHERE order_id = %s ORDER BY request_id DESC LIMIT 1
+        """, (order['order_id'],))
+        order['refund_request'] = cur.fetchone()
+
     cur.close()
     conn.close()
     return jsonify(orders)
@@ -1792,35 +1798,120 @@ def verify_order_payment(order_id):
     return jsonify({"error": result['error']}), 400
 
 
-@app.route('/api/orders/<int:order_id>/refund', methods=['POST'])
-@require_permission('orders.refund')
-def refund_order(order_id):
-    """Refunds a paid order through Razorpay, then only marks it Refunded once
-    Razorpay confirms the refund actually went through. If stock was already
-    deducted (order was Processing or Completed), it's restored the same
-    audited way it was taken — never a silent overwrite."""
-    user_id = g.user_id
+@app.route('/api/shop/orders/<int:order_id>/request-refund', methods=['POST'])
+@require_permission('shop.order')
+def request_refund(order_id):
+    """Customer-initiated first step. No money moves here — this only creates
+    a request for staff to review."""
+    customer_id = get_customer_id_for_user(g.user_id)
+    if not customer_id:
+        return jsonify({"error": "No linked customer record for this account"}), 400
+
+    data = request.json or {}
+    err = require_fields(data, ['reason'])
+    if err:
+        return err
 
     conn = get_connection()
     cur = conn.cursor(dictionary=True)
-    cur.execute("SELECT * FROM orders WHERE order_id = %s", (order_id,))
+    cur.execute("SELECT * FROM orders WHERE order_id = %s AND customer_id = %s", (order_id, customer_id))
     order = cur.fetchone()
     if not order:
         cur.close()
         conn.close()
         return jsonify({"error": "Order not found"}), 404
-
     if order.get('payment_status') != 'Paid':
         cur.close()
         conn.close()
-        return jsonify({"error": "Only paid orders can be refunded"}), 400
+        return jsonify({"error": "Only paid orders can have a refund requested"}), 400
+
+    cur.execute("SELECT COUNT(*) AS c FROM refund_requests WHERE order_id = %s AND status = 'Pending'", (order_id,))
+    existing = cur.fetchone()
+    cur.close()
+    conn.close()
+    if existing['c'] > 0:
+        return jsonify({"error": "A refund request for this order is already pending review"}), 400
+
+    conn2 = get_connection()
+    cur2 = conn2.cursor()
+    try:
+        cur2.execute("SET @current_user_id = %s", (g.user_id,))
+        conn2.start_transaction()
+        cur2.execute(
+            "INSERT INTO refund_requests (order_id, customer_id, reason) VALUES (%s, %s, %s)",
+            (order_id, customer_id, data['reason'])
+        )
+        cur2.execute(
+            "INSERT INTO notifications (message, link, order_id) VALUES (%s, %s, %s)",
+            (f"Refund requested for order #{order_id} — {data['reason'][:80]}", "/sales", order_id)
+        )
+        conn2.commit()
+    except Exception as e:
+        conn2.rollback()
+        return jsonify({"error": str(e)}), 400
+    finally:
+        cur2.close()
+        conn2.close()
+
+    return jsonify({"message": "Refund request submitted"}), 201
+
+
+@app.route('/api/refund-requests', methods=['GET'])
+@require_permission('orders.refund')
+def get_refund_requests():
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("""
+        SELECT rr.*, c.customer_name, o.total_amount
+        FROM refund_requests rr
+        JOIN customers c ON rr.customer_id = c.customer_id
+        JOIN orders o ON rr.order_id = o.order_id
+        ORDER BY rr.requested_at DESC
+    """)
+    data = cur.fetchall()
+    cur.close()
+    conn.close()
+    return jsonify(data)
+
+
+@app.route('/api/refund-requests/<int:request_id>/approve', methods=['PUT'])
+@require_permission('orders.refund')
+def approve_refund_request(request_id):
+    """This is the only place a real Razorpay refund actually happens now —
+    only reachable after a customer's request has been reviewed and approved.
+    Same audited stock-restoration behavior as before."""
+    user_id = g.user_id
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM refund_requests WHERE request_id = %s", (request_id,))
+    req = cur.fetchone()
+    if not req:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Refund request not found"}), 404
+    if req.get('status') != 'Pending':
+        cur.close()
+        conn.close()
+        return jsonify({"error": "This request has already been resolved"}), 400
+
+    cur.execute("SELECT * FROM orders WHERE order_id = %s", (req['order_id'],))
+    order = cur.fetchone()
+    if not order:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Order not found"}), 404
+    if order.get('payment_status') != 'Paid':
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Order is no longer in a paid state"}), 400
     if not order.get('razorpay_payment_id'):
         cur.close()
         conn.close()
         return jsonify({"error": "No payment record on file for this order — it may predate refund support"}), 400
 
     stock_was_deducted = order.get('order_status') in ('Processing', 'Completed')
-    cur.execute("SELECT * FROM order_items WHERE order_id = %s", (order_id,))
+    cur.execute("SELECT * FROM order_items WHERE order_id = %s", (req['order_id'],))
     items = cur.fetchall()
     cur.close()
     conn.close()
@@ -1846,12 +1937,16 @@ def refund_order(order_id):
                 cur2.execute(
                     """INSERT INTO inventory_transactions (product_id, user_id, transaction_type, quantity, remarks)
                        VALUES (%s,%s,'Stock In',%s,%s)""",
-                    (item['product_id'], user_id, item['quantity'], f"Refund for order #{order_id}")
+                    (item['product_id'], user_id, item['quantity'], f"Refund for order #{req['order_id']}")
                 )
 
         cur2.execute(
             "UPDATE orders SET payment_status = 'Refunded', order_status = 'Cancelled' WHERE order_id = %s",
-            (order_id,)
+            (req['order_id'],)
+        )
+        cur2.execute(
+            "UPDATE refund_requests SET status = 'Approved', resolved_at = NOW(), resolved_by = %s WHERE request_id = %s",
+            (user_id, request_id)
         )
         conn2.commit()
     except Exception as e:
@@ -1864,7 +1959,23 @@ def refund_order(order_id):
         cur2.close()
         conn2.close()
 
-    return jsonify({"message": "Refund processed", "refund_id": refund.get('id')})
+    return jsonify({"message": "Refund approved and processed", "refund_id": refund.get('id')})
+
+
+@app.route('/api/refund-requests/<int:request_id>/reject', methods=['PUT'])
+@require_permission('orders.refund')
+def reject_refund_request(request_id):
+    data = request.json or {}
+    staff_note = data.get('staff_note', '')
+
+    result = execute_transaction([
+        ("""UPDATE refund_requests SET status = 'Rejected', staff_note = %s, resolved_at = NOW(), resolved_by = %s
+            WHERE request_id = %s AND status = 'Pending'""",
+         (staff_note, g.user_id, request_id))
+    ], user_id=g.user_id)
+    if result['success']:
+        return jsonify({"message": "Refund request rejected"})
+    return jsonify({"error": result['error']}), 400
 
 
 # ---------- NOTIFICATIONS (shared feed for staff) ----------
