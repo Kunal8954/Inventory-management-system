@@ -24,4 +24,12 @@ export const receivePurchaseOrder = async (purchaseOrderId) => {
   }
 };
 
-export default { fetchPurchaseOrders, createPurchaseOrder, receivePurchaseOrder };
+export const updatePurchaseOrderPayment = async (purchaseOrderId, paymentStatus = 'Paid') => {
+  try {
+    return await api.put(`/purchase-orders/${purchaseOrderId}/payment`, { payment_status: paymentStatus });
+  } catch (error) {
+    throw new Error(error.message || 'Failed to update payment status');
+  }
+};
+
+export default { fetchPurchaseOrders, createPurchaseOrder, receivePurchaseOrder, updatePurchaseOrderPayment };

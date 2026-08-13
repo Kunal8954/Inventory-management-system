@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { EmptyState, Skeleton, Button, Modal, Notification } from '../components/common';
-import { fetchPurchaseOrders, createPurchaseOrder, receivePurchaseOrder } from '../services/purchaseService';
+import { fetchPurchaseOrders, createPurchaseOrder, receivePurchaseOrder, updatePurchaseOrderPayment } from '../services/purchaseService';
 import { fetchSuppliers } from '../services/supplierService';
 import { fetchProducts } from '../services/productService';
 
@@ -20,6 +20,7 @@ export default function Purchases() {
   const [formError, setFormError] = useState(null);
   const [notification, setNotification] = useState(null);
   const [receivingId, setReceivingId] = useState(null);
+  const [markingPaidId, setMarkingPaidId] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -76,6 +77,15 @@ export default function Purchases() {
     setItems((prev) => prev.map((it, i) => (i === index ? { ...it, [field]: value } : it)));
   };
 
+  const handleSupplierChange = (value) => {
+    setSupplierId(value);
+    setItems([{ ...emptyItem }]);
+  };
+
+  const supplierProducts = supplierId
+    ? products.filter((p) => String(p.supplier_id) === String(supplierId))
+    : [];
+
   const addItemRow = () => setItems((prev) => [...prev, { ...emptyItem }]);
 
   const removeItemRow = (index) => setItems((prev) => prev.filter((_, i) => i !== index));
@@ -122,6 +132,19 @@ export default function Purchases() {
     }
   };
 
+  const handleMarkPaid = async (purchaseOrderId) => {
+    setMarkingPaidId(purchaseOrderId);
+    try {
+      await updatePurchaseOrderPayment(purchaseOrderId, 'Paid');
+      await load();
+    } catch (err) {
+      setNotification({ type: 'error', message: err.message || 'Failed to update payment status' });
+      setTimeout(() => setNotification(null), 3000);
+    } finally {
+      setMarkingPaidId(null);
+    }
+  };
+
   const handleReceive = async (purchaseOrderId) => {
     const confirmed = window.confirm(
       `Mark purchase order #${purchaseOrderId} as received? This adds the ordered quantities to stock.`
@@ -154,7 +177,7 @@ export default function Purchases() {
           <label className="mb-1 block text-sm font-medium text-slate-700">Supplier *</label>
           <select
             value={supplierId}
-            onChange={(e) => setSupplierId(e.target.value)}
+            onChange={(e) => handleSupplierChange(e.target.value)}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-accent-500 focus:outline-none"
           >
             <option value="">Select supplier</option>
@@ -180,10 +203,13 @@ export default function Purchases() {
                 <select
                   value={item.product_id}
                   onChange={(e) => updateItem(index, 'product_id', e.target.value)}
-                  className="col-span-6 rounded-lg border border-slate-300 px-2 py-2 text-sm focus:border-accent-500 focus:outline-none"
+                  disabled={!supplierId}
+                  className="col-span-6 rounded-lg border border-slate-300 px-2 py-2 text-sm focus:border-accent-500 focus:outline-none disabled:bg-slate-50 disabled:text-slate-400"
                 >
-                  <option value="">Select product</option>
-                  {products.map((p) => (
+                  <option value="">
+                    {supplierId ? 'Select product' : 'Select a supplier first'}
+                  </option>
+                  {supplierProducts.map((p) => (
                     <option key={p.product_id ?? p.id} value={p.product_id ?? p.id}>
                       {p.product_name} ({p.sku})
                     </option>
@@ -338,7 +364,20 @@ export default function Purchases() {
                 <td className="px-6 py-4">
                   {Number(order.total_amount || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' })}
                 </td>
-                <td className="px-6 py-4">{order.payment_status || '-'}</td>
+                <td className="px-6 py-4">
+                  <div className="flex items-center gap-2">
+                    <span>{order.payment_status || '-'}</span>
+                    {String(order.payment_status || '').toLowerCase() === 'pending' && (
+                      <button
+                        onClick={() => handleMarkPaid(order.purchase_order_id)}
+                        disabled={markingPaidId === order.purchase_order_id}
+                        className="text-xs text-accent-600 hover:text-accent-700 font-medium underline disabled:opacity-50"
+                      >
+                        {markingPaidId === order.purchase_order_id ? 'Updating...' : 'Mark Paid'}
+                      </button>
+                    )}
+                  </div>
+                </td>
                 <td className="px-6 py-4">{order.purchase_status || '-'}</td>
                 <td className="px-6 py-4">
                   {order.order_date ? new Date(order.order_date).toLocaleString() : '-'}

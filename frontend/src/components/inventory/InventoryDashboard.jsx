@@ -4,9 +4,9 @@ import {
   FiAlertTriangle,
   FiTrendingDown,
   FiDollarSign,
-  FiPlus,
   FiMinus,
   FiDownload,
+  FiShoppingCart,
 } from 'react-icons/fi';
 import {
   Modal,
@@ -21,7 +21,6 @@ import {
   fetchLowStockAlerts,
   fetchTransactions,
   fetchInventoryStats,
-  createStockIn,
   createStockOut,
   exportInventoryToCSV,
 } from '../../services/inventoryService';
@@ -30,7 +29,7 @@ import InventoryStats from './InventoryStats';
 import InventoryTable from './InventoryTable';
 import TransactionHistory from './TransactionHistory';
 import { LowStockAlerts } from './TransactionHistory';
-import { StockInForm, StockOutForm } from './StockForms';
+import { StockOutForm } from './StockForms';
 
 const InventoryDashboard = () => {
   const [inventory, setInventory] = useState([]);
@@ -39,7 +38,6 @@ const InventoryDashboard = () => {
   const [stats, setStats] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
-  const [showStockInModal, setShowStockInModal] = useState(false);
   const [showStockOutModal, setShowStockOutModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -92,21 +90,6 @@ const InventoryDashboard = () => {
     }
   };
 
-  const handleStockIn = async (data) => {
-    try {
-      await createStockIn({
-        productId: parseInt(data.productId),
-        quantity: parseInt(data.quantity),
-        notes: data.notes || '',
-      });
-      showSuccess('Stock In recorded successfully!');
-      setShowStockInModal(false);
-      await refreshData();
-    } catch (error) {
-      showError(error.message || 'Failed to record stock in');
-    }
-  };
-
   const handleStockOut = async (data) => {
     try {
       await createStockOut({
@@ -142,14 +125,7 @@ const InventoryDashboard = () => {
           <p className="text-slate-600">Track and manage your stock levels in real-time</p>
         </div>
 
-        <div className="mb-6 flex gap-3 flex-wrap">
-          <Button
-            variant="primary"
-            onClick={() => setShowStockInModal(true)}
-            className="flex items-center gap-2"
-          >
-            <FiPlus size={20} /> Stock In
-          </Button>
+        <div className="mb-2 flex gap-3 flex-wrap items-center">
           <Button
             variant="secondary"
             onClick={() => setShowStockOutModal(true)}
@@ -165,6 +141,10 @@ const InventoryDashboard = () => {
             <FiDownload size={20} /> Export CSV
           </Button>
         </div>
+        <p className="mb-6 text-sm text-slate-500 flex items-center gap-1.5">
+          <FiShoppingCart size={14} />
+          Adding new stock happens through Purchase Orders now — create one and mark it Received.
+        </p>
 
         <div className="flex gap-4 mb-6 border-b border-slate-200">
           {[
@@ -204,19 +184,6 @@ const InventoryDashboard = () => {
             <LowStockAlerts alerts={lowStockAlerts} />
           )}
         </div>
-
-        <Modal
-          isOpen={showStockInModal}
-          title="Stock In"
-          onClose={() => setShowStockInModal(false)}
-          size="md"
-        >
-          <StockInForm
-            products={inventory}
-            onSubmit={handleStockIn}
-            onCancel={() => setShowStockInModal(false)}
-          />
-        </Modal>
 
         <Modal
           isOpen={showStockOutModal}

@@ -802,6 +802,20 @@ def receive_purchase_order(purchase_order_id):
     return jsonify({"message": "Purchase order received, stock updated"})
 
 
+@app.route('/api/purchase-orders/<int:purchase_order_id>/payment', methods=['PUT'])
+@require_permission('orders.create')
+def update_purchase_order_payment(purchase_order_id):
+    data = request.json or {}
+    payment_status = data.get('payment_status', 'Paid')
+    result = execute_transaction([
+        ("UPDATE purchase_orders SET payment_status = %s WHERE purchase_order_id = %s",
+         (payment_status, purchase_order_id))
+    ], user_id=g.user_id)
+    if result['success']:
+        return jsonify({"message": "Payment status updated"})
+    return jsonify({"error": result['error']}), 400
+
+
 # ---------- CUSTOMERS ----------
 @app.route('/api/customers', methods=['GET'])
 def get_customers():
@@ -2299,34 +2313,18 @@ def api_inventory_stats():
 
 @app.route('/api/inventory/in', methods=['POST'])
 def api_inventory_in():
+    """Deliberately disabled. Stock now only enters the system through a real
+    Purchase Order (create it, then mark it Received) — that's what keeps a
+    supplier, a cost, and a payment status attached to every unit added,
+    instead of stock appearing with no record of where it came from."""
     user_id = get_user_id_from_bearer_token()
     if not user_id:
         return jsonify({"success": False}), 401
 
-    data = request.json or {}
-    product_id = data.get('productId')
-    quantity = data.get('quantity')
-    notes = data.get('notes','')
-
-    if not product_id or not isinstance(quantity, (int, float)) or quantity <= 0:
-        return jsonify({"success": False, "error": "Invalid quantity"}), 400
-
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        conn.start_transaction()
-        cur.execute("SET @current_user_id = %s", (user_id,))
-        cur.execute("INSERT INTO inventory_transactions (product_id, user_id, transaction_type, quantity, remarks) VALUES (%s,%s,'Stock In',%s,%s)", (product_id, user_id, quantity, notes))
-        trans_id = cur.lastrowid
-        cur.execute("UPDATE products SET stock_quantity = stock_quantity + %s WHERE product_id = %s", (quantity, product_id))
-        conn.commit()
-        return jsonify({"success": True, "id": trans_id, "type": "STOCK_IN", "date": __import__('datetime').date.today().strftime('%Y-%m-%d')}), 201
-    except Exception as e:
-        conn.rollback()
-        return jsonify({"success": False, "error": str(e)}), 400
-    finally:
-        cur.close()
-        conn.close()
+    return jsonify({
+        "success": False,
+        "error": "Direct stock-in has been retired. Create a Purchase Order and mark it Received instead — that keeps supplier, cost, and payment tracked with every restock."
+    }), 400
 
 
 @app.route('/api/inventory/out', methods=['POST'])
