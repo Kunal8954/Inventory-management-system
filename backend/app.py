@@ -1780,14 +1780,91 @@ def verify_order_payment(order_id):
     if not hmac.compare_digest(expected_signature, data['razorpay_signature']):
         return jsonify({"error": "Payment verification failed"}), 400
 
-    # Signature is genuine — mark paid. This never touches order_status or stock;
-    # staff still separately approves the order, same as always.
+    # Signature is genuine — mark paid and remember which Razorpay payment this
+    # was, so a refund later has something real to point at. This never touches
+    # order_status or stock; staff still separately approves the order.
     result = execute_transaction([
-        ("UPDATE orders SET payment_status = 'Paid' WHERE order_id = %s", (order_id,))
+        ("UPDATE orders SET payment_status = 'Paid', razorpay_payment_id = %s WHERE order_id = %s",
+         (data['razorpay_payment_id'], order_id))
     ], user_id=g.user_id)
     if result['success']:
         return jsonify({"message": "Payment verified"})
     return jsonify({"error": result['error']}), 400
+
+
+@app.route('/api/orders/<int:order_id>/refund', methods=['POST'])
+@require_permission('orders.refund')
+def refund_order(order_id):
+    """Refunds a paid order through Razorpay, then only marks it Refunded once
+    Razorpay confirms the refund actually went through. If stock was already
+    deducted (order was Processing or Completed), it's restored the same
+    audited way it was taken — never a silent overwrite."""
+    user_id = g.user_id
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM orders WHERE order_id = %s", (order_id,))
+    order = cur.fetchone()
+    if not order:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Order not found"}), 404
+
+    if order.get('payment_status') != 'Paid':
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Only paid orders can be refunded"}), 400
+    if not order.get('razorpay_payment_id'):
+        cur.close()
+        conn.close()
+        return jsonify({"error": "No payment record on file for this order — it may predate refund support"}), 400
+
+    stock_was_deducted = order.get('order_status') in ('Processing', 'Completed')
+    cur.execute("SELECT * FROM order_items WHERE order_id = %s", (order_id,))
+    items = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    amount_paise = int(round(float(order['total_amount']) * 100))
+    try:
+        refund = razorpay_client.payment.refund(order['razorpay_payment_id'], {"amount": amount_paise})
+    except Exception as e:
+        return jsonify({"error": f"Refund failed: {str(e)}"}), 500
+
+    conn2 = get_connection()
+    cur2 = conn2.cursor()
+    try:
+        cur2.execute("SET @current_user_id = %s", (user_id,))
+        conn2.start_transaction()
+
+        if stock_was_deducted:
+            for item in items:
+                cur2.execute(
+                    "UPDATE products SET stock_quantity = stock_quantity + %s WHERE product_id = %s",
+                    (item['quantity'], item['product_id'])
+                )
+                cur2.execute(
+                    """INSERT INTO inventory_transactions (product_id, user_id, transaction_type, quantity, remarks)
+                       VALUES (%s,%s,'Stock In',%s,%s)""",
+                    (item['product_id'], user_id, item['quantity'], f"Refund for order #{order_id}")
+                )
+
+        cur2.execute(
+            "UPDATE orders SET payment_status = 'Refunded', order_status = 'Cancelled' WHERE order_id = %s",
+            (order_id,)
+        )
+        conn2.commit()
+    except Exception as e:
+        conn2.rollback()
+        return jsonify({
+            "error": f"Razorpay refund succeeded but updating our records failed: {str(e)}. "
+                     f"Refund ID: {refund.get('id')} — contact support to reconcile manually."
+        }), 500
+    finally:
+        cur2.close()
+        conn2.close()
+
+    return jsonify({"message": "Refund processed", "refund_id": refund.get('id')})
 
 
 # ---------- NOTIFICATIONS (shared feed for staff) ----------

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { EmptyState, Skeleton, Button, Modal, Notification } from '../components/common';
-import { fetchOrders, createOrder, updateOrderPayment, approveOrder, completeOrder } from '../services/salesService';
+import { fetchOrders, createOrder, updateOrderPayment, approveOrder, completeOrder, refundOrder } from '../services/salesService';
 import { fetchCustomers } from '../services/customerService';
 import { fetchProducts } from '../services/productService';
 import { useAuth } from '../contexts/AuthContext';
@@ -10,6 +10,7 @@ const emptyItem = { product_id: '', quantity: '1', unit_price: '' };
 export default function Sales() {
   const { user } = useAuth();
   const isStaff = user?.role === 'staff';
+  const canRefund = user?.role === 'admin' || user?.role === 'manager';
   const [orders, setOrders] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [products, setProducts] = useState([]);
@@ -137,6 +138,23 @@ export default function Sales() {
       await load();
     } catch (err) {
       alert(err.message || 'Failed to update payment status');
+    }
+  };
+
+  const [refundingId, setRefundingId] = useState(null);
+  const handleRefund = async (orderId) => {
+    const confirmed = window.confirm(
+      `Refund order #${orderId}? This sends the money back through Razorpay and can't be undone.`
+    );
+    if (!confirmed) return;
+    setRefundingId(orderId);
+    try {
+      await refundOrder(orderId);
+      await load();
+    } catch (err) {
+      alert(err.message || 'Failed to process refund');
+    } finally {
+      setRefundingId(null);
     }
   };
 
@@ -446,6 +464,15 @@ export default function Sales() {
                           className="text-xs text-accent-600 hover:text-accent-700 font-medium underline"
                         >
                           Mark Paid
+                        </button>
+                      )}
+                      {paymentStatus === 'Paid' && canRefund && (
+                        <button
+                          onClick={() => handleRefund(o.order_id || o.id)}
+                          disabled={refundingId === (o.order_id || o.id)}
+                          className="text-xs text-red-600 hover:text-red-700 font-medium underline disabled:opacity-50"
+                        >
+                          {refundingId === (o.order_id || o.id) ? 'Refunding...' : 'Refund'}
                         </button>
                       )}
                     </div>

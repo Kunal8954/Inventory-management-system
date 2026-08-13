@@ -32,6 +32,14 @@ export const approveOrder = async (orderId) => {
   }
 };
 
+export const refundOrder = async (orderId) => {
+  try {
+    return await api.post(`/orders/${orderId}/refund`, {});
+  } catch (error) {
+    throw new Error(error.message || 'Failed to process refund');
+  }
+};
+
 export const completeOrder = async (orderId) => {
   try {
     return await api.put(`/orders/${orderId}/complete`, {});
@@ -40,4 +48,4 @@ export const completeOrder = async (orderId) => {
   }
 };
 
-export default { fetchOrders, createOrder, updateOrderPayment, approveOrder, completeOrder };
+export default { fetchOrders, createOrder, updateOrderPayment, approveOrder, completeOrder, refundOrder };
