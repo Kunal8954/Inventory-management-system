@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { EmptyState, Skeleton, Button, Modal, Notification } from '../components/common';
-import { fetchPurchaseOrders, createPurchaseOrder } from '../services/purchaseService';
+import { fetchPurchaseOrders, createPurchaseOrder, receivePurchaseOrder } from '../services/purchaseService';
 import { fetchSuppliers } from '../services/supplierService';
 import { fetchProducts } from '../services/productService';
 
@@ -19,6 +19,7 @@ export default function Purchases() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
   const [notification, setNotification] = useState(null);
+  const [receivingId, setReceivingId] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -118,6 +119,25 @@ export default function Purchases() {
       setFormError(err.message || 'Failed to create purchase order');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleReceive = async (purchaseOrderId) => {
+    const confirmed = window.confirm(
+      `Mark purchase order #${purchaseOrderId} as received? This adds the ordered quantities to stock.`
+    );
+    if (!confirmed) return;
+    setReceivingId(purchaseOrderId);
+    try {
+      await receivePurchaseOrder(purchaseOrderId);
+      setNotification({ type: 'success', message: 'Purchase order received — stock updated' });
+      setTimeout(() => setNotification(null), 3000);
+      await load();
+    } catch (err) {
+      setNotification({ type: 'error', message: err.message || 'Failed to mark received' });
+      setTimeout(() => setNotification(null), 3000);
+    } finally {
+      setReceivingId(null);
     }
   };
 
@@ -307,6 +327,7 @@ export default function Purchases() {
               <th className="px-6 py-3 text-sm font-semibold text-slate-900">Payment</th>
               <th className="px-6 py-3 text-sm font-semibold text-slate-900">Status</th>
               <th className="px-6 py-3 text-sm font-semibold text-slate-900">Date</th>
+              <th className="px-6 py-3 text-sm font-semibold text-slate-900">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -321,6 +342,17 @@ export default function Purchases() {
                 <td className="px-6 py-4">{order.purchase_status || '-'}</td>
                 <td className="px-6 py-4">
                   {order.order_date ? new Date(order.order_date).toLocaleString() : '-'}
+                </td>
+                <td className="px-6 py-4">
+                  {String(order.purchase_status || '').toLowerCase() === 'pending' && (
+                    <button
+                      onClick={() => handleReceive(order.purchase_order_id)}
+                      disabled={receivingId === order.purchase_order_id}
+                      className="text-xs font-semibold text-white bg-accent-600 hover:bg-accent-700 disabled:opacity-50 px-3 py-1.5 rounded-lg transition"
+                    >
+                      {receivingId === order.purchase_order_id ? 'Receiving...' : 'Mark Received'}
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

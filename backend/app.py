@@ -44,6 +44,7 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
+RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET")
 razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
 # ----------------------
@@ -670,6 +671,66 @@ def create_purchase_order():
     finally:
         cur.close()
         conn.close()
+
+
+@app.route('/api/purchase-orders/<int:purchase_order_id>/receive', methods=['PUT'])
+@require_permission('orders.create')
+def receive_purchase_order(purchase_order_id):
+    """Marking a purchase order Received is what actually adds the stock —
+    until now this endpoint didn't exist at all, so stock never moved on this
+    side of the business. Same audited pattern as everywhere else: a real
+    inventory_transactions entry per item, never a silent number change."""
+    user_id = g.user_id
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM purchase_orders WHERE purchase_order_id = %s", (purchase_order_id,))
+    po = cur.fetchone()
+    if not po:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Purchase order not found"}), 404
+    if po.get('purchase_status') != 'Pending':
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Only pending purchase orders can be marked received"}), 400
+
+    cur.execute("SELECT * FROM purchase_order_items WHERE purchase_order_id = %s", (purchase_order_id,))
+    items = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    conn2 = get_connection()
+    cur2 = conn2.cursor()
+    try:
+        cur2.execute("SET @current_user_id = %s", (user_id,))
+        conn2.start_transaction()
+
+        for item in items:
+            cur2.execute(
+                "UPDATE products SET stock_quantity = stock_quantity + %s WHERE product_id = %s",
+                (item['quantity'], item['product_id'])
+            )
+            cur2.execute(
+                """INSERT INTO inventory_transactions (product_id, user_id, transaction_type, quantity, remarks)
+                   VALUES (%s,%s,'Stock In',%s,%s)""",
+                (item['product_id'], user_id, item['quantity'], f"Received purchase order #{purchase_order_id}")
+            )
+
+        cur2.execute(
+            "UPDATE purchase_orders SET purchase_status = 'Received' WHERE purchase_order_id = %s",
+            (purchase_order_id,)
+        )
+        conn2.commit()
+    except Exception as e:
+        conn2.rollback()
+        return jsonify({"error": str(e)}), 400
+    finally:
+        cur2.close()
+        conn2.close()
+
+    return jsonify({"message": "Purchase order received, stock updated"})
+
 
 # ---------- CUSTOMERS ----------
 @app.route('/api/customers', methods=['GET'])
@@ -1744,6 +1805,10 @@ def create_order_payment(order_id):
     except Exception as e:
         return jsonify({"error": f"Could not start payment: {str(e)}"}), 500
 
+    execute_transaction([
+        ("UPDATE orders SET razorpay_order_id = %s WHERE order_id = %s", (razorpay_order["id"], order_id))
+    ])
+
     return jsonify({
         "razorpay_order_id": razorpay_order["id"],
         "amount": amount_paise,
@@ -1976,6 +2041,52 @@ def reject_refund_request(request_id):
     if result['success']:
         return jsonify({"message": "Refund request rejected"})
     return jsonify({"error": result['error']}), 400
+
+
+@app.route('/api/webhooks/razorpay', methods=['POST'])
+def razorpay_webhook():
+    """A safety net independent of the customer's browser. Razorpay calls this
+    directly, server-to-server, so a payment that succeeds but never makes it
+    back through the client-side callback (closed tab, dropped connection)
+    still gets recorded here. Idempotent — if the client-side flow already
+    marked the order paid, this is a no-op."""
+    webhook_signature = request.headers.get('X-Razorpay-Signature', '')
+    raw_body = request.get_data(as_text=True)
+
+    if not RAZORPAY_WEBHOOK_SECRET:
+        return jsonify({"error": "Webhook not configured"}), 500
+
+    try:
+        razorpay_client.utility.verify_webhook_signature(raw_body, webhook_signature, RAZORPAY_WEBHOOK_SECRET)
+    except Exception:
+        return jsonify({"error": "Invalid signature"}), 400
+
+    event = request.json or {}
+    event_type = event.get('event')
+
+    if event_type == 'payment.captured':
+        payment_entity = event.get('payload', {}).get('payment', {}).get('entity', {})
+        razorpay_order_id = payment_entity.get('order_id')
+        razorpay_payment_id = payment_entity.get('id')
+
+        if razorpay_order_id:
+            conn = get_connection()
+            cur = conn.cursor(dictionary=True)
+            cur.execute("SELECT order_id, payment_status FROM orders WHERE razorpay_order_id = %s", (razorpay_order_id,))
+            order = cur.fetchone()
+            cur.close()
+            conn.close()
+
+            # Only act if we found the order AND it isn't already marked paid —
+            # this is what makes it safe to fire even when the normal flow
+            # already succeeded on its own.
+            if order and order['payment_status'] != 'Paid':
+                execute_transaction([
+                    ("UPDATE orders SET payment_status = 'Paid', razorpay_payment_id = %s WHERE order_id = %s",
+                     (razorpay_payment_id, order['order_id']))
+                ])
+
+    return jsonify({"status": "ok"}), 200
 
 
 # ---------- NOTIFICATIONS (shared feed for staff) ----------

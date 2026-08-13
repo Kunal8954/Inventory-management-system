@@ -16,4 +16,12 @@ export const createPurchaseOrder = async (payload) => {
   }
 };
 
-export default { fetchPurchaseOrders, createPurchaseOrder };
+export const receivePurchaseOrder = async (purchaseOrderId) => {
+  try {
+    return await api.put(`/purchase-orders/${purchaseOrderId}/receive`, {});
+  } catch (error) {
+    throw new Error(error.message || 'Failed to mark purchase order received');
+  }
+};
+
+export default { fetchPurchaseOrders, createPurchaseOrder, receivePurchaseOrder };
