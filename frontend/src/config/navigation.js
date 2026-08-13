@@ -23,7 +23,7 @@ export const navGroups = [
     items: [
       {
         label: "Dashboard",
-        path: "/",
+        path: "/dashboard",
         icon: FaThLarge,
       },
     ],
