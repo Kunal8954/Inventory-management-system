@@ -42,6 +42,14 @@ export const uploadProductImage = async (productId, file) => {
   }
 };
 
+export const fetchProductReviews = async (productId) => {
+  try {
+    return await api.get(`/products/${productId}/reviews`);
+  } catch (error) {
+    throw new Error(error.message || 'Failed to fetch reviews');
+  }
+};
+
 export const fetchProductImages = async (productId) => {
   try {
     return await api.get(`/products/${productId}/images`);
@@ -75,4 +83,5 @@ export default {
   fetchProductImages,
   deleteProductImage,
   setProductImagePrimary,
+  fetchProductReviews,
 };

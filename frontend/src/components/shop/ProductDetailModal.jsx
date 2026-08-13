@@ -1,12 +1,23 @@
 import { useEffect, useState } from 'react';
-import { FiPlus } from 'react-icons/fi';
+import { FiPlus, FiStar } from 'react-icons/fi';
 import { Modal } from '../common';
-import { fetchProductImages } from '../../services/productService';
+import { fetchProductImages, fetchProductReviews } from '../../services/productService';
+import { submitProductReview } from '../../services/shopService';
+import { useAuth } from '../../contexts/AuthContext';
 
 export default function ProductDetailModal({ isOpen, onClose, product, onAddToCart }) {
+  const { isAuthenticated } = useAuth();
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeImage, setActiveImage] = useState(null);
+
+  const [reviews, setReviews] = useState([]);
+  const [reviewsLoading, setReviewsLoading] = useState(true);
+  const [myRating, setMyRating] = useState(0);
+  const [myComment, setMyComment] = useState('');
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [reviewError, setReviewError] = useState(null);
+  const [reviewSuccess, setReviewSuccess] = useState(false);
 
   useEffect(() => {
     if (!isOpen || !product) return;
@@ -33,6 +44,48 @@ export default function ProductDetailModal({ isOpen, onClose, product, onAddToCa
 
     return () => (mounted = false);
   }, [isOpen, product]);
+
+  const loadReviews = () => {
+    if (!product) return;
+    const id = product.product_id ?? product.id;
+    setReviewsLoading(true);
+    fetchProductReviews(id)
+      .then((data) => setReviews(Array.isArray(data) ? data : []))
+      .catch(() => setReviews([]))
+      .finally(() => setReviewsLoading(false));
+  };
+
+  useEffect(() => {
+    if (!isOpen || !product) return;
+    setReviewSuccess(false);
+    setReviewError(null);
+    setMyRating(0);
+    setMyComment('');
+    loadReviews();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, product]);
+
+  const handleSubmitReview = async (e) => {
+    e.preventDefault();
+    setReviewError(null);
+    if (myRating < 1) {
+      setReviewError('Pick a star rating first.');
+      return;
+    }
+    setSubmittingReview(true);
+    try {
+      const id = product.product_id ?? product.id;
+      await submitProductReview(id, myRating, myComment.trim());
+      setReviewSuccess(true);
+      setMyRating(0);
+      setMyComment('');
+      loadReviews();
+    } catch (err) {
+      setReviewError(err.message || 'Failed to submit review');
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
 
   if (!product) return null;
 
@@ -105,6 +158,76 @@ export default function ProductDetailModal({ isOpen, onClose, product, onAddToCa
             <FiPlus size={16} /> Add to cart
           </button>
         </div>
+      </div>
+
+      <div className="border-t border-slate-200 mt-6 pt-6">
+        <h3 className="text-sm font-semibold text-slate-900 mb-3">
+          Reviews {reviews.length > 0 && <span className="text-slate-400 font-normal">({reviews.length})</span>}
+        </h3>
+
+        {reviewsLoading ? (
+          <p className="text-sm text-slate-400">Loading reviews...</p>
+        ) : reviews.length === 0 ? (
+          <p className="text-sm text-slate-400 mb-4">No reviews yet — be the first to leave one.</p>
+        ) : (
+          <div className="space-y-3 mb-4 max-h-48 overflow-y-auto pr-1">
+            {reviews.map((r) => (
+              <div key={r.review_id} className="border-b border-slate-100 pb-3 last:border-0">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-medium text-slate-900">{r.customer_name}</span>
+                  <span className="text-amber-500 text-xs">
+                    {'\u2605'.repeat(r.rating)}
+                    {'\u2606'.repeat(5 - r.rating)}
+                  </span>
+                </div>
+                {r.comment && <p className="text-sm text-slate-600">{r.comment}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {isAuthenticated && !reviewSuccess && (
+          <form onSubmit={handleSubmitReview} className="bg-slate-50 rounded-lg p-4">
+            <p className="text-xs font-medium text-slate-700 mb-2">Leave a review</p>
+            <div className="flex items-center gap-1 mb-3">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => setMyRating(n)}
+                  className="text-lg leading-none"
+                  aria-label={`Rate ${n} stars`}
+                >
+                  <FiStar
+                    className={n <= myRating ? 'fill-amber-400 text-amber-400' : 'text-slate-300'}
+                    size={20}
+                  />
+                </button>
+              ))}
+            </div>
+            <textarea
+              value={myComment}
+              onChange={(e) => setMyComment(e.target.value)}
+              rows={2}
+              placeholder="Optional — what did you think?"
+              className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 mb-2 focus:outline-none focus:border-accent-500"
+            />
+            {reviewError && <p className="text-xs text-red-600 mb-2">{reviewError}</p>}
+            <button
+              type="submit"
+              disabled={submittingReview}
+              className="text-sm font-medium bg-accent-600 hover:bg-accent-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg transition"
+            >
+              {submittingReview ? 'Submitting...' : 'Submit Review'}
+            </button>
+          </form>
+        )}
+
+        {reviewSuccess && (
+          <p className="text-sm text-green-600 bg-green-50 rounded-lg px-4 py-3">
+            Thanks — your review has been posted.
+          </p>
+        )}
       </div>
     </Modal>
   );

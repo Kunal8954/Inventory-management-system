@@ -225,6 +225,15 @@ export default function ShopBrowse() {
           )}
         </button>
         <p className="font-semibold text-slate-900">{product.product_name || product.name}</p>
+        {product.avg_rating && (
+          <p className="text-xs text-amber-500 mb-0.5">
+            {'\u2605'.repeat(Math.round(product.avg_rating))}
+            {'\u2606'.repeat(5 - Math.round(product.avg_rating))}
+            <span className="text-slate-400 ml-1">
+              {product.avg_rating} ({product.review_count})
+            </span>
+          </p>
+        )}
         <p className="text-xs text-slate-500 mb-1">{product.sku}</p>
         {product.description && (
           <p className="text-xs text-slate-500 mb-2 line-clamp-2">{product.description}</p>

@@ -174,13 +174,83 @@ def get_products():
         SELECT p.*,
                (SELECT image_url FROM product_images pi
                 WHERE pi.product_id = p.product_id AND pi.is_primary = 1
-                LIMIT 1) AS image_url
+                LIMIT 1) AS image_url,
+               (SELECT ROUND(AVG(rating), 1) FROM product_reviews pr
+                WHERE pr.product_id = p.product_id) AS avg_rating,
+               (SELECT COUNT(*) FROM product_reviews pr
+                WHERE pr.product_id = p.product_id) AS review_count
         FROM products p
     """)
     products = cur.fetchall()
     cur.close()
     conn.close()
     return jsonify(products)
+
+@app.route('/api/products/<int:product_id>/reviews', methods=['GET'])
+def get_product_reviews(product_id):
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("""
+        SELECT pr.review_id, pr.rating, pr.comment, pr.created_at, c.customer_name
+        FROM product_reviews pr
+        JOIN customers c ON pr.customer_id = c.customer_id
+        WHERE pr.product_id = %s
+        ORDER BY pr.created_at DESC
+    """, (product_id,))
+    reviews = cur.fetchall()
+    cur.close()
+    conn.close()
+    return jsonify(reviews)
+
+
+@app.route('/api/shop/products/<int:product_id>/reviews', methods=['POST'])
+@require_permission('shop.order')
+def submit_product_review(product_id):
+    """Verified-purchase only — the customer needs a Completed order that
+    actually contains this product before they can review it."""
+    customer_id = get_customer_id_for_user(g.user_id)
+    if not customer_id:
+        return jsonify({"error": "No linked customer record for this account"}), 400
+
+    data = request.json or {}
+    err = require_fields(data, ['rating'])
+    if err:
+        return err
+
+    try:
+        rating = int(data['rating'])
+    except (TypeError, ValueError):
+        return jsonify({"error": "Rating must be a number"}), 400
+    if rating < 1 or rating > 5:
+        return jsonify({"error": "Rating must be between 1 and 5"}), 400
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("""
+        SELECT o.order_id FROM orders o
+        JOIN order_items oi ON o.order_id = oi.order_id
+        WHERE o.customer_id = %s AND oi.product_id = %s AND o.order_status = 'Completed'
+        ORDER BY o.order_id DESC LIMIT 1
+    """, (customer_id, product_id))
+    verified_order = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not verified_order:
+        return jsonify({"error": "You can only review products from a completed order"}), 400
+
+    result = execute_transaction([
+        ("""INSERT INTO product_reviews (product_id, customer_id, order_id, rating, comment)
+            VALUES (%s,%s,%s,%s,%s)""",
+         (product_id, customer_id, verified_order['order_id'], rating, data.get('comment', '')))
+    ], user_id=g.user_id)
+
+    if result['success']:
+        return jsonify({"message": "Review submitted"}), 201
+    if 'Duplicate entry' in str(result.get('error', '')):
+        return jsonify({"error": "You've already reviewed this product"}), 400
+    return jsonify({"error": result['error']}), 400
+
 
 @app.route('/api/products/<int:product_id>', methods=['GET'])
 def get_product(product_id):

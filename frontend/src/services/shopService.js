@@ -56,6 +56,14 @@ export const requestRefund = async (orderId, reason) => {
   }
 };
 
+export const submitProductReview = async (productId, rating, comment) => {
+  try {
+    return await api.post(`/shop/products/${productId}/reviews`, { rating, comment });
+  } catch (error) {
+    throw new Error(error.message || 'Failed to submit review');
+  }
+};
+
 export const fetchMyProfile = async () => {
   try {
     return await api.get('/shop/profile');
@@ -72,4 +80,4 @@ export const updateMyProfile = async (profile) => {
   }
 };
 
-export default { registerCustomer, fetchMyOrders, placeOrder, cancelOrder, createOrderPayment, verifyOrderPayment, requestRefund, fetchMyProfile, updateMyProfile };
+export default { registerCustomer, fetchMyOrders, placeOrder, cancelOrder, createOrderPayment, verifyOrderPayment, requestRefund, submitProductReview, fetchMyProfile, updateMyProfile };
