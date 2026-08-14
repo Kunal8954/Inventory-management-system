@@ -1,167 +1,179 @@
-# 📦 StockPilot — Enterprise Inventory Management System
+# StockPilot
 
-StockPilot is a full-stack inventory management system built to demonstrate core **enterprise data engineering principles** — Data Integrity, Reliability, Availability, and Scalability — rather than just basic CRUD operations. It manages products, categories, suppliers, customers, purchase orders, and sales, with role-based access control and a fully audited transaction trail.
+**Enterprise inventory management with a full customer storefront** — built as an academic project, structured like a real product.
 
-> Academic project (5th Semester Mini Project) — but built with production-grade patterns: RBAC, database triggers, ACID transactions, and OTP-based email verification.
+StockPilot started as a database-and-transactions exercise and grew into a two-sided system: a role-secured admin platform for running inventory, sales, and purchasing, paired with a public-facing shop where customers browse, pay, and get their orders fulfilled — all backed by the same audited, transactional database.
 
----
-
-## 🔗 Live Demo
-
-- **Frontend:** https://inventory-management-system-three-teal.vercel.app
-- **Backend API:** https://inventory-management-system-production-702e.up.railway.app
-- **Demo login:** create an account via Register, or use a seeded demo account (see below)
+**Live:** [Shop](https://inventory-management-system-three-teal.vercel.app/shop) · [Admin Login](https://inventory-management-system-three-teal.vercel.app/login) · [API](https://inventory-management-system-production-702e.up.railway.app/health)
 
 ---
 
-## ✨ Key Features
+## What this actually is
 
-### Enterprise Concepts (the actual point of this project)
-- **ACID Transactions** — stock movements, sales, and purchase orders are wrapped in transactions with automatic rollback on failure (`execute_transaction()` helper + manual transaction blocks for multi-step operations)
-- **Role-Based Access Control (RBAC)** — `Admin`, `Manager`, and `Staff` roles, enforced server-side via a `@require_permission()` decorator that checks against a `roles` → `role_permissions` → `permissions` join, not just hidden UI buttons
-- **Audit Logging via Triggers** — 12 MySQL triggers automatically log every `INSERT`/`UPDATE`/`DELETE` on core tables into an `audit_logs` table (`table_name`, `record_id`, `action_type`, `changed_by`, `old_data`, `new_data`, `timestamp`) — the application code never writes audit logs directly
-- **Data Integrity** — foreign key constraints across the schema (products → categories/suppliers, orders → customers, purchase orders → suppliers), enforced at the database level, not just in application logic
-- **OTP Email Verification** — real 6-digit OTP sent via Gmail SMTP on registration; accounts are unusable until verified
+Two portals sharing one backend and one database:
 
-### Application Features
-- Product, Category, and Supplier management (full CRUD)
-- **Sales** — create an order against a customer, which atomically deducts stock and logs a `Stock Out` inventory transaction in the same DB transaction
-- **Purchases** — create a purchase order against a supplier with multiple line items and auto-calculated totals
-- **Inventory Management** — manual Stock In / Stock Out / Adjust, with full transaction history
-- Live dashboard (total products, low stock count, inventory value, recent transactions)
-- Global search across products, suppliers, and customers from the navbar
-- Role selection at registration (Admin / Manager / Staff)
+- **Admin / Staff portal** — inventory, products, purchasing, sales, users, reports, all gated by real role-based permissions, not hardcoded role checks.
+- **Customer shop** — guest browsing, three login methods, real payments, refund requests, verified-purchase reviews.
+
+Nothing in either portal bypasses the other's audit trail. A customer's payment is verified server-side before it's trusted. A refund goes through a request-and-approve flow before real money moves. Stock only enters the system through a Purchase Order that's actually been received — there's no back door that lets a number change without a record of why.
 
 ---
 
-## 🛠 Tech Stack
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph FE["Frontend — React (Vite) + Tailwind, on Vercel"]
+        direction LR
+        FEA["Admin / Staff Portal<br/>Dashboard · Products · Sales · Users"]
+        FEC["Customer Shop<br/>Browse · Cart · Orders · Profile"]
+    end
+
+    subgraph BE["Backend — Flask REST API, on Railway"]
+        direction LR
+        BEA["Admin & Inventory Logic<br/>RBAC · Products · Purchasing · Reports"]
+        BEC["Shop & Orders Logic<br/>Auth · Cart · Checkout · Notifications"]
+    end
+
+    subgraph DB["Database — MySQL InnoDB, Railway MySQL"]
+        DBT["users · roles · permissions · products · orders<br/>purchase_orders · customers · suppliers · notifications · audit_log"]
+    end
+
+    subgraph EXT["External Services"]
+        direction LR
+        RZP["Razorpay<br/>Payments + Refunds"]
+        CLD["Cloudinary<br/>Product Photos"]
+        RSD["Resend<br/>Transactional Email"]
+        GGL["Google OAuth<br/>Customer Sign-In"]
+    end
+
+    FE --> BE --> DB
+    BE -.-> EXT
+```
+
+---
+
+## Key features
+
+### Access control
+- Real RBAC — `users`, `roles`, `permissions`, `role_permissions` tables, enforced by a `@require_permission` decorator on every protected route, never a hardcoded `if role == 'admin'`
+- Granular permissions like `products.update`, `orders.refund`, `dashboard.financials` — Staff, Manager, and Admin each see a genuinely different app, not the same UI with things hidden
+- Customer accounts are structurally protected from being promoted into staff roles
+
+### Inventory & purchasing
+- Full product CRUD with multi-photo galleries (Cloudinary) — upload several photos per product, pick which one's primary
+- Stock changes are audited, not editable — `stock_quantity` is deliberately excluded from the product edit form; every change goes through a logged Stock In/Out/Adjust transaction
+- **Purchase Orders are the only way stock enters the system** — a supplier, a cost, and a payment status are attached to every unit added, with the product list filtered per-supplier so you can't order the wrong company's item
+- Low stock alerts, full transaction history, CSV export
+
+### Sales & fulfillment
+- Full order lifecycle: **Pending → Processing → Completed**, with stock deducted at the moment an order is actually approved, not when it's requested
+- Real-time staff notifications (order requests, refund requests, low stock) with a live unread badge
+- Two-sided payment reminder system — customers who owe money and vendors who are owed, each with their own configurable follow-up interval
+
+### Payments (real, not simulated)
+- Razorpay integration — customers pay through Razorpay's own secure widget; card details never touch this server
+- Server-side signature verification on every payment — the frontend reporting "success" is never trusted on its own
+- A **webhook safety net** independent of the customer's browser — if a payment succeeds but the client-side confirmation never arrives (closed tab, dropped connection), the webhook still marks it paid
+- Refunds go through a **request-and-approve flow**: the customer states a reason, staff reviews and approves before any money actually moves — not a unilateral button
+
+### Customer shop
+- Guest browsing by default — the site's own root URL leads to the shop, not a staff login wall
+- Three ways to sign in: email/password, phone/password, or Google OAuth
+- Full photo gallery + description in a product detail popup, with **verified-purchase reviews** — you can only review something you actually received
+- Cart, checkout, delivery details, order cancellation, and a customer-facing "Pay Now" retry if a payment gets interrupted
+- A self-service profile page
+
+### Trust & correctness
+- 12 database triggers write every insert/update/delete to a real `audit_log` automatically
+- Every multi-step write runs through a single `execute_transaction()` helper with automatic rollback on failure
+- **Automated tests** (`pytest`) prove the transaction rollback actually works — not just that it's supposed to — alongside RBAC enforcement and input validation checks
+
+---
+
+## Tech stack
 
 | Layer | Technology |
 |---|---|
-| Frontend | React (Vite), Tailwind CSS |
-| Backend | Python, Flask |
+| Frontend | React (Vite) + Tailwind CSS |
+| Backend | Python / Flask |
 | Database | MySQL (InnoDB) |
-| Auth | Bearer token (signed via `itsdangerous`), bcrypt password hashing |
-| Email | Gmail SMTP (`smtplib`) for OTP delivery |
-| Rate Limiting | Flask-Limiter |
-| Dev Tools | VS Code, MySQL Workbench, Git, Postman |
+| Auth | Bearer tokens (itsdangerous) + bcrypt, Google OAuth |
+| Payments | Razorpay (signature-verified + webhook-backed) |
+| Media | Cloudinary |
+| Email | Resend (custom domain) |
+| Hosting | Vercel (frontend) · Railway (backend + MySQL) |
+| Testing | pytest |
 
 ---
 
-## 🏗 Architecture
+## Getting started locally
 
-```
-┌─────────────────────────────────────────────────┐
-│                  React Frontend                  │
-│   (Vite + Tailwind, Bearer token in localStorage) │
-└───────────────────────┬───────────────────────────┘
-                         │ REST API (JSON)
-┌───────────────────────▼───────────────────────────┐
-│                Flask Application Layer             │
-│  Routes → @require_permission → business logic     │
-└───────────────────────┬───────────────────────────┘
-                         │ mysql-connector
-┌───────────────────────▼───────────────────────────┐
-│              MySQL (InnoDB) — Core Engine           │
-│  Tables + FK constraints + 12 audit triggers        │
-└─────────────────────────────────────────────────────┘
-```
-
-The database is treated as a **generic core engine** (RBAC + audit logging + transaction safety), with the inventory-specific tables (products, orders, purchase orders...) built on top of it — the same pattern real enterprise systems use so the audit/RBAC layer can be reused across modules.
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Python 3.9+
-- Node.js 18+
-- MySQL 8.0+ (InnoDB support)
-- A Gmail account with an [App Password](https://myaccount.google.com/apppasswords) (for OTP emails)
-
-### 1. Clone the repo
 ```bash
 git clone https://github.com/Kunal8954/Inventory-management-system.git
 cd Inventory-management-system
 ```
 
-### 2. Database setup
-```sql
-CREATE DATABASE ims;
--- Import the schema (tables, triggers, seed roles/permissions) from /database/schema.sql
-```
-
-### 3. Backend setup
+**Backend**
 ```bash
 cd backend
-python3 -m venv venv
-source venv/bin/activate       # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-Create a `.env` file in `/backend`:
-```env
-DB_HOST=localhost
-DB_USER=your_mysql_user
-DB_PASSWORD=your_mysql_password
-DB_NAME=ims
-SECRET_KEY=generate_a_random_secret_key
-GMAIL_USER=your_email@gmail.com
-GMAIL_APP_PASSWORD=your_16_char_app_password
-```
-
-Run the server:
-```bash
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt --break-system-packages
+cp .env.example .env   # fill in DB credentials, Resend/Cloudinary/Razorpay/Google keys
 python3 app.py
 ```
-Backend runs at `http://localhost:5000`.
 
-### 4. Frontend setup
+**Frontend**
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-Frontend runs at `http://localhost:5173`.
+
+**Database**
+```bash
+mysql -u <user> -p -e "CREATE DATABASE ims"
+mysql -u <user> -p ims < backend/schema.sql
+```
+
+**Running the tests**
+```bash
+cd backend
+export TEST_STAFF_TOKEN="<a valid staff bearer token>"
+python3 -m pytest test_app.py -v
+```
 
 ---
 
-## 📡 API Overview
+## Design decisions worth knowing about
 
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/api/auth/register` | Register (sends OTP email) |
-| POST | `/api/auth/verify-otp` | Verify OTP, returns auth token |
-| POST | `/api/auth/login` | Login (requires verified email) |
-| GET | `/api/products` | List products |
-| POST | `/api/products` | Create product *(requires `products.create`)* |
-| POST | `/api/orders` | Create a sale — deducts stock atomically |
-| POST | `/api/purchase-orders` | Create a purchase order |
-| POST | `/api/inventory/in` \| `/out` \| `/adjust` | Manual stock movements |
-| GET | `/health` | Health check |
+A few things that were deliberate, not accidental:
 
-Full route list in `backend/app.py`.
+- **Stock quantity isn't in the product edit form.** It's tempting to let admins just type a new number — but that bypasses the audit trail. Stock only moves through logged Stock In/Out/Adjust actions.
+- **Refunds require a customer-stated reason and staff approval**, not a direct button. Real money moving deserves a real review step.
+- **The payment webhook exists because client-side confirmation alone isn't reliable.** A closed browser tab shouldn't mean a paid order sits marked unpaid forever.
+- **Direct "Stock In" was retired once Purchase Orders could actually track suppliers and payment.** Keeping both would have made the formal purchasing process optional in practice.
+- **Product reviews require a `Completed` order containing that product.** Anyone can *say* they bought something; only a real order can prove it.
 
 ---
 
-## 🔐 Roles & Permissions
+## Planned extensions
 
-| Role | Typical Access |
-|---|---|
-| **Admin** | Full access — products, users, all modules |
-| **Manager** | Day-to-day operations — products, orders, purchases |
-| **Staff** | Limited — view + record stock movements |
+Two things were deliberately scoped out, not missed:
 
-Permissions are stored in the database (`roles`, `permissions`, `role_permissions`) and checked server-side on every protected route — not just hidden in the UI.
+- **True multi-tenant architecture** — isolating multiple independent businesses on one deployment. This needs its own properly planned effort (a `business_id` boundary across ~15 tables and every route), scoped as a future capstone project rather than a retrofit.
+- **Supplier payouts via RazorpayX** — actually sending money to vendors, not just recording that they were paid. This needs a real business bank account and its own KYC, so it's deferred until there's an actual business funding it.
 
 ---
 
-## 📌 Planned / Future Improvements
-- Barcode field on Add Product + barcode-scanner-driven Sales entry (scanner acts as a keyboard input; the `products.barcode` column already exists)
-- Product image upload
-- Dedicated stock-alert notifications (email/push) instead of computed low-stock views
-- Order status workflow (Pending → Shipped → Completed / Cancelled)
-- Automated tests
+## Contributors
+
+Built by **Kunal Sharma** and **Dipanshu Vaghmarey**.
 
 ---
 
+## Links
+
+- [GitHub Repository](https://github.com/Kunal8954/Inventory-management-system)
+- [Live Shop](https://inventory-management-system-three-teal.vercel.app/shop)
+- [Live Admin](https://inventory-management-system-three-teal.vercel.app/login)
